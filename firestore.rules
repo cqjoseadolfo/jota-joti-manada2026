@@ -1,0 +1,21 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Permitir lectura y escritura de lobatos registrados para el evento nacional JOTA-JOTI
+    match /lobatos/{lobatoId} {
+      allow read, write: if true;
+    }
+    // Permitir lectura y consulta de dirigentes/adultos voluntarios registrados
+    match /adultos/{adultoId} {
+      allow read, write: if true;
+    }
+    // Permitir almacenamiento de archivos y documentos anexos (metadatos o base64/doc)
+    match /documentos_anexos/{docId} {
+      allow read, write: if true;
+    }
+    // Logs de auditoría de actualización de nicknames
+    match /auditoria_nicknames/{logId} {
+      allow read, write: if true;
+    }
+  }
+}

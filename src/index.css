@@ -1,0 +1,246 @@
+@import "tailwindcss";
+
+:root {
+  --scout-yellow: #FFD700;
+  --scout-blue: #1E90FF;
+  --scout-green: #2ECC71;
+  --scout-red: #E74C3C;
+  --scout-orange: #F39C12;
+  --scout-dark: #050B1F;
+}
+
+body {
+  font-family: 'Fredoka', sans-serif;
+  background-color: var(--scout-dark);
+}
+
+@layer utilities {
+  .font-game {
+    font-family: 'Fredoka', sans-serif;
+  }
+
+  /* 3D Title typography text extrusions */
+  .text-3d-jota {
+    text-shadow: 0 8px 0 #000, 0 0 20px rgba(30, 144, 255, 0.5);
+    -webkit-text-stroke: 2px #000;
+  }
+
+  .text-3d-yellow {
+    color: var(--scout-yellow);
+    text-shadow: 0 4px 0 #000, 0 8px 0 #854D0E;
+    -webkit-text-stroke: 1.5px #000;
+  }
+
+  .text-3d-blue {
+    color: var(--scout-blue);
+    text-shadow: 0 4px 0 #000, 0 8px 0 #1E3A8A;
+    -webkit-text-stroke: 1.5px #000;
+  }
+
+  .text-stroke-black {
+    -webkit-text-stroke: 1.5px #000000;
+  }
+
+  .text-stroke-thick {
+    -webkit-text-stroke: 2.5px #000000;
+  }
+
+  /* 3D Windows & Panels */
+  .win-3d {
+    background: #ffffff;
+    border: 4px solid #000000;
+    border-radius: 24px;
+    box-shadow: 0 12px 0 #000000;
+    color: #000000;
+    position: relative;
+    transition: all 0.2s ease;
+  }
+
+  .win-3d-dark {
+    background: #0F172A;
+    border: 4px solid #000000;
+    border-radius: 24px;
+    box-shadow: 0 12px 0 #000000;
+    color: #ffffff;
+    position: relative;
+  }
+
+  .win-3d-blue {
+    background: var(--scout-blue);
+    border: 4px solid #000000;
+    border-radius: 24px;
+    box-shadow: 0 10px 0 #000000;
+    color: #ffffff;
+  }
+
+  .win-3d-amber {
+    background: #FEF3C7;
+    border: 4px solid #000000;
+    border-radius: 24px;
+    box-shadow: 0 10px 0 #000000;
+    color: #000000;
+  }
+
+  /* 3D Interactive Buttons */
+  .btn-3d {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 4px solid #000000;
+    border-radius: 16px;
+    font-family: 'Fredoka', sans-serif;
+    font-weight: 700;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: transform 0.1s ease, box-shadow 0.1s ease;
+    box-shadow: 0 6px 0 #000000;
+    padding: 12px 24px;
+    gap: 8px;
+    user-select: none;
+  }
+  .btn-3d:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 0 #000000;
+  }
+  .btn-3d:active:not(:disabled) {
+    transform: translateY(4px);
+    box-shadow: 0 2px 0 #000000;
+  }
+
+  .btn-green {
+    background-color: var(--scout-green);
+    color: #ffffff;
+  }
+  .btn-green:hover:not(:disabled) {
+    background-color: #38E37E;
+  }
+
+  .btn-red {
+    background-color: var(--scout-red);
+    color: #ffffff;
+  }
+  .btn-red:hover:not(:disabled) {
+    background-color: #F06554;
+  }
+
+  .btn-yellow {
+    background-color: var(--scout-yellow);
+    color: #000000;
+  }
+  .btn-yellow:hover:not(:disabled) {
+    background-color: #FFE033;
+  }
+
+  .btn-blue {
+    background-color: var(--scout-blue);
+    color: #ffffff;
+  }
+  .btn-blue:hover:not(:disabled) {
+    background-color: #3AA0FF;
+  }
+
+  .btn-orange {
+    background-color: var(--scout-orange);
+    color: #ffffff;
+  }
+  .btn-orange:hover:not(:disabled) {
+    background-color: #F5AF38;
+  }
+
+  .btn-dark {
+    background-color: #1E293B;
+    color: #ffffff;
+  }
+  .btn-dark:hover:not(:disabled) {
+    background-color: #334155;
+  }
+
+  /* 3D Inputs */
+  .input-3d {
+    border: 3px solid #000000;
+    border-radius: 12px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    padding-left: 15px;
+    padding-right: 15px;
+    font-family: 'Fredoka', sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    width: 100%;
+    box-sizing: border-box;
+    background-color: #ffffff;
+    color: #000000;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .input-with-icon-left,
+  .input-icon-left {
+    padding-left: 44px !important;
+  }
+  .input-with-icon-right,
+  .input-icon-right {
+    padding-right: 48px !important;
+  }
+  .input-3d:focus {
+    outline: none;
+    border-color: #000000;
+    box-shadow: 0 0 0 3px rgba(255, 215, 0, 0.7);
+  }
+  .input-3d::placeholder {
+    color: #94A3B8;
+    font-weight: 500;
+  }
+
+  /* 3D Cards */
+  .card-lobato {
+    background-color: #ffffff;
+    border: 3px solid #000000;
+    border-radius: 16px;
+    padding: 14px;
+    box-shadow: 4px 4px 0 #000000;
+    color: #000000;
+    font-family: 'Fredoka', sans-serif;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .card-lobato:hover {
+    transform: translateY(-2px);
+    box-shadow: 4px 6px 0 #000000;
+  }
+
+  /* Scroll box */
+  .scroll-box {
+    overflow-y: auto;
+    max-height: 480px;
+    padding-right: 8px;
+    padding-bottom: 28px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .scroll-box::-webkit-scrollbar {
+    width: 8px;
+  }
+  .scroll-box::-webkit-scrollbar-track {
+    background: #E2E8F0;
+    border-radius: 10px;
+    border: 1px solid #CBD5E1;
+  }
+  .scroll-box::-webkit-scrollbar-thumb {
+    background: #000000;
+    border-radius: 10px;
+  }
+}
+
+/* Global scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #050B1F;
+}
+::-webkit-scrollbar-thumb {
+  background: #1E293B;
+  border: 2px solid #050B1F;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}

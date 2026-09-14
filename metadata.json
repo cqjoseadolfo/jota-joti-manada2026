@@ -1,0 +1,6 @@
+{
+  "name": "JOTA JOTI Manada Perú 2026",
+  "description": "Sistema oficial de registro y gestión de dirigentes y lobatos para JOTA JOTI Manada Perú 2026.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
