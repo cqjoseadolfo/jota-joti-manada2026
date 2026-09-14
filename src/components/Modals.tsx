@@ -112,8 +112,13 @@ export const EditLobatoModal: React.FC<EditLobatoModalProps> = ({ lobato, onSave
         className="w-full max-w-xl my-auto win-3d p-6 sm:p-8 text-black"
       >
         <div className="flex items-center justify-between border-b-4 border-black pb-3 mb-5">
-          <h3 className="text-xl sm:text-2xl font-bold uppercase font-game text-black flex items-center gap-2">
-            <span>✏</span> Editar Lobato #{String(lobato.orden).padStart(2, '0')}
+          <h3 className="text-xl sm:text-2xl font-bold uppercase font-game text-black flex items-center gap-2.5">
+            <img
+              src="/assets/images/lobatos.jpg"
+              alt="Lobato"
+              className="w-7 h-7 rounded-full border border-black object-cover"
+            />
+            <span>Editar Lobato #{String(lobato.orden).padStart(2, '0')}</span>
           </h3>
           <button
             onClick={onClose}
@@ -429,7 +434,12 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div>
               <h4 className="font-game text-lg font-bold text-black flex items-center gap-2">
-                <span>👤</span> {adulto.nombre}
+                <img
+                  src="/assets/images/World_Scout_Emblem.png"
+                  alt="World Scout Emblem"
+                  className="w-5 h-5 object-contain"
+                />
+                <span>{adulto.nombre}</span>
               </h4>
               <p className="text-xs text-slate-600 font-semibold flex items-center gap-2 flex-wrap mt-0.5">
                 <span>ASP: <strong>{adulto.registroAsp}</strong></span>
@@ -618,8 +628,14 @@ export const DirigenteSuccessModal: React.FC<DirigenteSuccessModalProps> = ({
         transition={{ duration: 0.18, ease: 'easeOut' }}
         className="w-full max-w-md text-center win-3d p-6 sm:p-8 text-black"
       >
-        <div className="text-5xl mb-3">
-          👤
+        <div className="flex items-center justify-center mb-3">
+          <div className="w-16 h-16 rounded-2xl bg-blue-50 border-2 border-black p-2 flex items-center justify-center shadow-[2px_2px_0_#000]">
+            <img
+              src="/assets/images/World_Scout_Emblem.png"
+              alt="World Scout Emblem"
+              className="w-full h-full object-contain"
+            />
+          </div>
         </div>
 
         <div className="bg-[#1E90FF] text-white border-3 border-black px-4 py-1 rounded-xl inline-block shadow-[2px_2px_0_#000] mb-3">

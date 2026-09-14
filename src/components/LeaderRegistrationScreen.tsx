@@ -406,15 +406,25 @@ export const LeaderRegistrationScreen: React.FC<LeaderRegistrationScreenProps> =
           ← VOLVER
         </button>
 
-        <span className="px-3.5 py-1 rounded-xl bg-white border-3 border-black text-black text-xs font-bold font-game uppercase tracking-wider shadow-[2px_2px_0_#000]">
-          👤 Ficha Dirigente Scout
+        <span className="px-3.5 py-1 rounded-xl bg-white border-3 border-black text-black text-xs font-bold font-game uppercase tracking-wider shadow-[2px_2px_0_#000] flex items-center gap-2">
+          <img
+            src="/assets/images/World_Scout_Emblem.png"
+            alt="World Scout Emblem"
+            className="w-5 h-5 object-contain"
+          />
+          Ficha Dirigente Scout
         </span>
       </div>
 
       <div className="win-3d p-6 sm:p-8 text-black">
         <div className="border-b-4 border-black pb-3 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <h2 className="text-2xl sm:text-3xl font-bold uppercase font-game text-black flex items-center gap-2">
-            <span>👤</span> Registrar Dirigente
+          <h2 className="text-2xl sm:text-3xl font-bold uppercase font-game text-black flex items-center gap-3">
+            <img
+              src="/assets/images/World_Scout_Emblem.png"
+              alt="World Scout Emblem"
+              className="w-9 h-9 sm:w-10 sm:h-10 object-contain drop-shadow"
+            />
+            <span>Registrar Dirigente</span>
           </h2>
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs font-bold text-red-700 bg-red-100 border-2 border-black px-2.5 py-1 rounded-lg font-game">

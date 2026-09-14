@@ -377,7 +377,12 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
           ← VOLVER
         </button>
 
-        <div className="text-center flex-1 mx-2 sm:mx-8">
+        <div className="text-center flex-1 mx-2 sm:mx-8 flex items-center justify-center gap-3">
+          <img
+            src="/assets/images/lobatos.jpg"
+            alt="Lobatos"
+            className="w-10 h-10 sm:w-11 sm:h-11 rounded-full border-2 border-black object-cover shadow-[2px_2px_0_#000] shrink-0"
+          />
           <h2
             className="text-2xl sm:text-3xl md:text-4xl font-bold uppercase text-white font-game"
             style={{
@@ -587,7 +592,12 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
         <div className="lg:col-span-5 win-3d p-6 flex flex-col gap-4">
           <div className="flex items-center justify-between border-b-4 border-black pb-2">
             <h3 className="text-xl font-bold uppercase font-game text-black flex items-center gap-2">
-              <span>🐾</span> Nuevo Lobato
+              <img
+                src="/assets/images/lobatos.jpg"
+                alt="Lobato"
+                className="w-6 h-6 rounded-full border border-black object-cover"
+              />
+              <span>Nuevo Lobato</span>
             </h3>
             {selectedAdulto && (
               <span className="text-xs font-bold text-green-700 bg-green-100 border-2 border-black px-2 py-0.5 rounded-lg">
