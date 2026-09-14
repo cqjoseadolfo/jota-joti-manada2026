@@ -379,7 +379,7 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
 
         <div className="text-center flex-1 mx-2 sm:mx-8 flex items-center justify-center gap-3">
           <img
-            src="/assets/images/lobatos.jpg"
+            src="/assets/images/lobatos.png"
             alt="Lobatos"
             className="w-10 h-10 sm:w-11 sm:h-11 rounded-full border-2 border-black object-cover shadow-[2px_2px_0_#000] shrink-0"
           />
@@ -593,7 +593,7 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
           <div className="flex items-center justify-between border-b-4 border-black pb-2">
             <h3 className="text-xl font-bold uppercase font-game text-black flex items-center gap-2">
               <img
-                src="/assets/images/lobatos.jpg"
+                src="/assets/images/lobatos.png"
                 alt="Lobato"
                 className="w-6 h-6 rounded-full border border-black object-cover"
               />

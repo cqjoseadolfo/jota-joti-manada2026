@@ -114,7 +114,7 @@ export const EditLobatoModal: React.FC<EditLobatoModalProps> = ({ lobato, onSave
         <div className="flex items-center justify-between border-b-4 border-black pb-3 mb-5">
           <h3 className="text-xl sm:text-2xl font-bold uppercase font-game text-black flex items-center gap-2.5">
             <img
-              src="/assets/images/lobatos.jpg"
+              src="/assets/images/lobatos.png"
               alt="Lobato"
               className="w-7 h-7 rounded-full border border-black object-cover"
             />
