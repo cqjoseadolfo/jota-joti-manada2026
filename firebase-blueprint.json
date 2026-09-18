@@ -1,0 +1,70 @@
+{
+  "entities": {
+    "Adulto": {
+      "title": "Adulto",
+      "description": "Dirigente o adulto voluntario scout registrado",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nombre": { "type": "string" },
+        "nombres": { "type": "string" },
+        "apellidos": { "type": "string" },
+        "dni": { "type": "string" },
+        "registroAsp": { "type": "string" },
+        "grupoScout": { "type": "string" },
+        "cargo": { "type": "string" },
+        "comisionStaff": { "type": "string" },
+        "ciudad": { "type": "string" },
+        "email": { "type": "string" },
+        "celular": { "type": "string" },
+        "nicknameRoblox": { "type": "string" },
+        "dirigenteReferenteId": { "type": "string" },
+        "dirigenteReferenteNombre": { "type": "string" },
+        "dirigenteReferenteAsp": { "type": "string" },
+        "archivoAnexo3": { "type": "string" },
+        "archivoAnexo3Name": { "type": "string" },
+        "archivoAnexo3Size": { "type": "string" },
+        "voucherPago": { "type": "string" },
+        "voucherPagoName": { "type": "string" },
+        "voucherPagoSize": { "type": "string" },
+        "fechaRegistro": { "type": "string" }
+      },
+      "required": ["id", "nombre", "registroAsp"]
+    },
+    "Lobato": {
+      "title": "Lobato",
+      "description": "Lobato participante registrado",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nombres": { "type": "string" },
+        "apellidos": { "type": "string" },
+        "dni": { "type": "string" },
+        "fechaNacimiento": { "type": "string" },
+        "nicknameRoblox": { "type": "string" },
+        "grupoScout": { "type": "string" },
+        "ciudad": { "type": "string" },
+        "adultoId": { "type": "string" },
+        "adultoNombre": { "type": "string" },
+        "adultoAsp": { "type": "string" },
+        "seisena": { "type": "string" },
+        "permisoPadreAnexo4": { "type": "string" }
+      },
+      "required": ["id", "nombres", "apellidos", "dni", "adultoId"]
+    }
+  },
+  "firestore": {
+    "/adultos/{adultoId}": {
+      "schema": "Adulto",
+      "description": "Directorio de dirigentes scouts registrados"
+    },
+    "/lobatos/{lobatoId}": {
+      "schema": "Lobato",
+      "description": "Directorio de lobatos participantes"
+    },
+    "/documentos_anexos/{docId}": {
+      "schema": "DocumentoAnexo",
+      "description": "Metadatos de documentos y vouchers"
+    }
+  }
+}

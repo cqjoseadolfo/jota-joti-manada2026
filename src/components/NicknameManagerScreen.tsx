@@ -136,18 +136,18 @@ export const NicknameManagerScreen: React.FC<NicknameManagerScreenProps> = ({
     loadAdults();
   }, []);
 
-  // 1. Verificación ÚNICAMENTE con el Código del Adulto y carga de SUS lobatos
+  // 1. Verificación ÚNICAMENTE con el Código del Adulto (Coincidencia EXACTA por números) y carga de SUS lobatos
   const handleVerifyAdult = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setAuthError(null);
 
-    const cleanAsp = aspInput.trim().toUpperCase();
-    if (!cleanAsp) {
-      setAuthError('Por favor ingresa el código o registro ASP del adulto/dirigente.');
+    const inputDigits = aspInput.trim().replace(/[^0-9]/g, '');
+    if (!inputDigits) {
+      setAuthError('Por favor ingresa únicamente los números de tu código ASP (ej. 202021).');
       return;
     }
 
-    const cleanInput = cleanAsp.replace(/[^A-Z0-9]/g, '');
+    const expectedStandardAsp = `ASP-${inputDigits}`;
     setIsLoadingLobatos(true);
 
     let adults = allAdultos;
@@ -160,27 +160,35 @@ export const NicknameManagerScreen: React.FC<NicknameManagerScreenProps> = ({
       }
     }
 
+    // Búsqueda ESTRICTA y EXACTA: sin includes ni coincidencias parciales
     let foundDirigente = adults.find((adult) => {
-      const currentAsp = (adult.registroAsp || '').toUpperCase();
-      const currentClean = currentAsp.replace(/[^A-Z0-9]/g, '');
+      const currentAsp = (adult.registroAsp || '').trim().toUpperCase();
+      const currentDigits = currentAsp.replace(/[^0-9]/g, '');
       return (
-        currentAsp === cleanAsp ||
-        currentClean === cleanInput ||
-        (cleanInput.length >= 3 && currentClean.includes(cleanInput)) ||
-        (currentClean.length >= 3 && cleanInput.includes(currentClean))
+        (currentDigits !== '' && currentDigits === inputDigits) ||
+        currentAsp === expectedStandardAsp ||
+        currentAsp === `ASP${inputDigits}`
       );
     });
 
+    if (!foundDirigente) {
+      setIsLoadingLobatos(false);
+      setAuthError(
+        `❌ No se encontró ningún adulto/dirigente con el código ASP-${inputDigits}. Por favor ingresa el número exacto e intenta nuevamente.`
+      );
+      return;
+    }
+
     let remoteLobatos: Lobato[] = [];
     try {
-      remoteLobatos = await getLobatosByAdulto(foundDirigente ? foundDirigente.id : '', cleanAsp);
+      remoteLobatos = await getLobatosByAdulto(foundDirigente.id, expectedStandardAsp);
     } catch (err) {
       console.warn('Error cargando lobatos del dirigente:', err);
     }
 
     // Si aún no se encuentran lobatos en Firestore, revisar si hay borrador en sessionStorage de este dirigente
-    if (remoteLobatos.length === 0 && cleanInput) {
-      const draft = sessionStorage.getItem(`draft_seisena_${cleanInput}`);
+    if (remoteLobatos.length === 0 && inputDigits) {
+      const draft = sessionStorage.getItem(`draft_seisena_${inputDigits}`);
       if (draft) {
         try {
           const parsed = JSON.parse(draft);
@@ -195,27 +203,6 @@ export const NicknameManagerScreen: React.FC<NicknameManagerScreenProps> = ({
           console.warn('Error leyendo borrador local:', e);
         }
       }
-    }
-
-    // Si el dirigente no estaba precargado pero tiene lobatos registrados, reconstruir dirigente
-    if (!foundDirigente && remoteLobatos.length > 0) {
-      const sample = remoteLobatos[0];
-      foundDirigente = {
-        id: sample.adultoId || `dir_${cleanInput}`,
-        nombre: sample.adultoNombre || 'Dirigente',
-        registroAsp: cleanAsp.startsWith('ASP-') ? cleanAsp : `ASP-${cleanInput}`,
-        cargo: 'DIRIGENTE A CARGO',
-        grupoScout: sample.grupoScout || '',
-        ciudad: sample.ciudad || '',
-      };
-    }
-
-    if (!foundDirigente) {
-      setIsLoadingLobatos(false);
-      setAuthError(
-        `❌ No se encontró ningún adulto/dirigente con el código "${aspInput.trim()}". Por favor verifica e intenta nuevamente.`
-      );
-      return;
     }
 
     // Autorización exitosa: cargamos ÚNICAMENTE sus lobatos
@@ -275,11 +262,13 @@ export const NicknameManagerScreen: React.FC<NicknameManagerScreenProps> = ({
     if (e) e.preventDefault();
     if (!selectedLobato) return;
 
-    const trimmed = newNickname.trim();
-    if (!trimmed) {
-      setNicknameError('Por favor ingresa un nuevo nickname de Roblox válido.');
+    const clean = newNickname.replace(/^@+/, '').trim();
+    if (!clean) {
+      setNicknameError('Por favor ingresa un nuevo nickname de Roblox válido (ej. @akela_2809).');
       return;
     }
+
+    const trimmed = clean.startsWith('@') ? clean : `@${clean}`;
 
     setNicknameError(null);
 
@@ -417,33 +406,35 @@ export const NicknameManagerScreen: React.FC<NicknameManagerScreenProps> = ({
               <label className="text-sm font-bold uppercase text-black font-game flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
                   <Shield className="w-4 h-4 text-blue-600" />
-                  Código o Registro ASP del Adulto <span className="text-red-500">*</span>
+                  Código ASP del Adulto <span className="text-red-500">*</span>
                 </span>
                 <span className="text-xs text-slate-500 normal-case font-semibold">
-                  Ejemplo: ASP-00125
+                  Solo números
                 </span>
               </label>
 
-              <div className="relative">
-                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none z-10">
-                  <Shield className="w-5 h-5 text-blue-600" />
-                </span>
+              <div className="flex rounded-xl overflow-hidden border-3 border-black shadow-[3px_3px_0_#000] bg-white focus-within:ring-3 focus-within:ring-yellow-400">
+                <div className="bg-yellow-400 text-black font-game font-extrabold px-3.5 sm:px-4 py-3 border-r-3 border-black flex items-center justify-center select-none text-base sm:text-lg tracking-wider shrink-0">
+                  ASP-
+                </div>
                 <input
                   type="text"
-                  value={aspInput}
-                  onChange={(e) => setAspInput(e.target.value)}
-                  placeholder="Ingresa tu código ASP (ej. ASP-00125)"
-                  className="input-3d input-with-icon-left !pl-12 !pr-24 text-base font-bold uppercase tracking-wider py-3 w-full"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={aspInput.replace(/^ASP-?/i, '')}
+                  onChange={(e) => {
+                    const onlyNums = e.target.value.replace(/[^0-9]/g, '');
+                    setAspInput(onlyNums);
+                    setAuthError(null);
+                  }}
+                  placeholder="Solo números (ej. 202021)"
+                  className="flex-1 px-4 py-3 text-base sm:text-lg font-bold font-mono text-slate-900 focus:outline-none placeholder:text-slate-400 placeholder:font-sans placeholder:text-sm"
                   autoFocus
                 />
-                <button
-                  type="submit"
-                  className="absolute right-2 top-2 bottom-2 px-4 bg-emerald-500 hover:bg-emerald-400 text-white font-game font-bold rounded-lg border-2 border-black flex items-center gap-1 text-xs uppercase shadow-[1px_1px_0_#000]"
-                >
-                  <Search className="w-3.5 h-3.5" />
-                  <span>Ver</span>
-                </button>
               </div>
+              <p className="text-[11px] text-slate-600 font-semibold">
+                El prefijo <strong>ASP-</strong> ya está precargado; ingresa a su derecha únicamente los dígitos numéricos.
+              </p>
             </div>
 
             <button
@@ -583,18 +574,23 @@ export const NicknameManagerScreen: React.FC<NicknameManagerScreenProps> = ({
                     <label className="text-xs font-bold uppercase text-black font-game flex items-center justify-between mb-1">
                       <span>Nuevo Nickname de Roblox:</span>
                       <span className="text-[11px] text-slate-600 normal-case font-semibold">
-                        (Letras, números y guion bajo)
+                        Usuario: @akela_2809
                       </span>
                     </label>
                     <div className="flex flex-col sm:flex-row gap-2">
-                      <div className="relative flex-1">
-                        <Gamepad2 className="w-5 h-5 text-emerald-700 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none z-10" />
+                      <div className="relative flex-1 flex items-center">
+                        <span className="absolute left-3.5 text-emerald-700 font-black font-mono text-base select-none pointer-events-none z-10">
+                          @
+                        </span>
                         <input
                           type="text"
-                          value={newNickname}
-                          onChange={(e) => setNewNickname(e.target.value)}
-                          placeholder="Ingresa el nuevo nickname (ej. Scout_Gamer26)"
-                          className="input-3d input-with-icon-left !pl-12 text-base font-bold w-full"
+                          value={newNickname.replace(/^@+/, '')}
+                          onChange={(e) => {
+                            const clean = e.target.value.replace(/^@+/, '');
+                            setNewNickname(clean ? `@${clean}` : '');
+                          }}
+                          placeholder="akela_2809"
+                          className="input-3d !pl-9 text-base font-bold w-full"
                           autoFocus
                         />
                       </div>
@@ -612,16 +608,19 @@ export const NicknameManagerScreen: React.FC<NicknameManagerScreenProps> = ({
                   {nicknameSuggestions.length > 0 && (
                     <div className="flex items-center gap-1.5 flex-wrap pt-1 text-xs">
                       <span className="font-game font-bold text-[11px] text-slate-600">Sugerencias:</span>
-                      {nicknameSuggestions.map((sug) => (
-                        <button
-                          key={sug}
-                          type="button"
-                          onClick={() => setNewNickname(sug)}
-                          className="px-2.5 py-1 rounded-lg bg-white hover:bg-emerald-100 border border-black font-game font-bold text-xs text-black transition-colors"
-                        >
-                          +{sug}
-                        </button>
-                      ))}
+                      {nicknameSuggestions.map((sug) => {
+                        const formattedSug = sug.startsWith('@') ? sug : `@${sug}`;
+                        return (
+                          <button
+                            key={sug}
+                            type="button"
+                            onClick={() => setNewNickname(formattedSug)}
+                            className="px-2.5 py-1 rounded-lg bg-white hover:bg-emerald-100 border border-black font-game font-bold text-xs text-black transition-colors"
+                          >
+                            +{formattedSug}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </form>
@@ -731,9 +730,11 @@ export const NicknameManagerScreen: React.FC<NicknameManagerScreenProps> = ({
                       className={`${palette.bgHeader} px-4 py-3 border-b-3 border-black flex items-center justify-between flex-wrap gap-2`}
                     >
                       <div className="flex items-center gap-2.5">
-                        <span className="text-xl select-none">{palette.iconEmoji}</span>
+                        <span className="text-2xl select-none">{seisena.info?.emoji || palette.iconEmoji}</span>
                         <h3 className={`font-game text-lg sm:text-xl font-bold uppercase ${palette.textColor}`}>
-                          {seisena.nombre}
+                          {seisena.info
+                            ? `Seisena ${seisena.info.numero}: ${seisena.info.animal} ${seisena.info.titulo}`
+                            : seisena.nombre}
                         </h3>
                         <span
                           className={`text-xs font-game font-bold px-2.5 py-0.5 rounded-full border-2 border-black shadow-[1px_1px_0_#000] ${

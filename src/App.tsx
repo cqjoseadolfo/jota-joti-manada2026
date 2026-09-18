@@ -25,7 +25,6 @@ import {
   saveMultipleLobatosToFirestore,
   deleteLobatoFromFirestore,
   updateLobatoNicknameInFirestore,
-  saveAdultoToFirestore,
 } from './lib/databaseService';
 
 export default function App() {
@@ -82,13 +81,8 @@ export default function App() {
   };
 
   // Handle Dirigente saved
-  const handleDirigenteSaved = async (dirigente: DirigenteRegistro) => {
+  const handleDirigenteSaved = (dirigente: DirigenteRegistro) => {
     setModalState({ type: 'dirigente_success', dirigente });
-    try {
-      await saveAdultoToFirestore(dirigente);
-    } catch (e) {
-      console.warn('Error guardando dirigente en Firestore:', e);
-    }
   };
 
   // Handle Final Lobatos Confirmation
@@ -124,10 +118,10 @@ export default function App() {
     }
   };
 
-  // Reset for next registration
+  // Reset for next seisena registration
   const handleResetForNextBatch = () => {
     setLobatos([]);
-    setSelectedAdulto(null);
+    // Mantener el dirigente seleccionado para que pueda registrar su siguiente seisena de inmediato
     setModalState({ type: 'none' });
     setCurrentScreen('lobatos');
   };
@@ -176,6 +170,7 @@ export default function App() {
               <LobatosRegistrationScreen
                 key="lobatos-screen"
                 onBack={() => setCurrentScreen('home')}
+                onGoToNicknames={() => setCurrentScreen('nicknames')}
                 onOpenSummary={(adulto, lobatosList) => {
                   setModalState({ type: 'summary' });
                 }}
@@ -268,14 +263,6 @@ export default function App() {
           />
         )}
       </AnimatePresence>
-
-      {/* FOOTER */}
-      <footer className="relative z-10 w-full py-4 text-center text-xs text-slate-500 font-medium font-game border-t border-slate-900/80 backdrop-blur-sm">
-        <div className="max-w-4xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>⚜️ Asociación de Scouts del Perú • Manada 2026</span>
-          <span className="text-slate-400">Prototipo Visual & Experiencia de Usuario • JOTA JOTI</span>
-        </div>
-      </footer>
     </div>
   );
 }

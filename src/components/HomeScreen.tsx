@@ -136,16 +136,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </button>
         </div>
 
-        {/* Small mission status footer */}
-        <div className="mt-8 pt-4 border-t-2 border-black/10 flex items-center justify-between text-xs font-bold text-slate-600 font-game flex-wrap gap-2">
-          <span className="flex items-center gap-1.5">
-            <Sparkles className="w-4 h-4 text-amber-500 animate-spin" style={{ animationDuration: '6s' }} />
-            Asociación de Scouts del Perú
-          </span>
-          <span className="bg-black text-white px-3 py-1 rounded-lg shadow-sm">
-            Sistema Oficial 2026
-          </span>
-        </div>
+
       </div>
     </motion.div>
   );

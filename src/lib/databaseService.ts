@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { db, GCS_STORAGE_BUCKET, GCS_STORAGE_FOLDER } from './firebase';
 import { Lobato, AdultoVoluntario, DirigenteRegistro } from '../types';
+import { REGIONES_LOCALIDADES_SCOUT } from '../data/regionesScout';
 
 const LOBATOS_COLLECTION = 'lobatos';
 const ADULTOS_COLLECTION = 'adultos';
@@ -30,6 +31,7 @@ export interface DocumentoAnexoMeta {
   storageBucket: string;
   storagePath: string;
   downloadUrl?: string;
+  url?: string;
   storageStatus: 'subido_exitosamente' | 'error_permisos_o_cors';
   errorMensaje?: string;
   fechaSubida: string;
@@ -42,7 +44,35 @@ export interface UploadAnexoResult {
 }
 
 /**
- * Sube un documento anexo (Anexo 3 o Anexo 4) usando directamente
+ * Limpia recursivamente un objeto para asegurar que ningún campo con valor `undefined`
+ * sea enviado a Firestore (lo cual causa rechazo de escritura fatal).
+ */
+export function cleanObjectForFirestore<T extends Record<string, any>>(obj: T): any {
+  if (obj === null || obj === undefined) return null;
+  if (typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) {
+    return obj.map((item) => cleanObjectForFirestore(item)).filter((item) => item !== undefined);
+  }
+  const cleaned: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      if (
+        value !== null &&
+        typeof value === 'object' &&
+        !(value instanceof Date) &&
+        (value as any)?.constructor?.name !== 'FieldValue'
+      ) {
+        cleaned[key] = cleanObjectForFirestore(value);
+      } else {
+        cleaned[key] = value;
+      }
+    }
+  }
+  return cleaned;
+}
+
+/**
+ * Sube un documento anexo (Anexo 3, Anexo 4 o Voucher de Pago) usando directamente
  * el endpoint REST estándar de Google Cloud Storage mediante fetch():
  * https://storage.googleapis.com/upload/storage/v1/b/ai-studio-bucket-692554933038-us-east1/o?uploadType=media&name=documentos_anexos/[NOMBRE_DEL_ARCHIVO]
  *
@@ -166,6 +196,8 @@ export async function uploadDocumentoAnexo(
     } catch (_) {}
   }
 
+  const finalUrl = downloadUrl || dataUrl || '';
+
   const anexoMeta: DocumentoAnexoMeta = {
     id: docId,
     nombreArchivo: file.name,
@@ -177,6 +209,7 @@ export async function uploadDocumentoAnexo(
     storageBucket: GCS_STORAGE_BUCKET,
     storagePath,
     downloadUrl,
+    url: finalUrl,
     storageStatus,
     errorMensaje: errorDiagnostico,
     fechaSubida: new Date().toISOString(),
@@ -184,10 +217,12 @@ export async function uploadDocumentoAnexo(
 
   try {
     const docRef = doc(db, ANEXOS_COLLECTION, docId);
-    await setDoc(docRef, {
+    const cleanedMeta = cleanObjectForFirestore({
       ...anexoMeta,
       createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
+    await setDoc(docRef, cleanedMeta);
     console.log(`[Firestore] Metadatos del documento anexo guardados en colección "${ANEXOS_COLLECTION}":`, docId);
   } catch (error) {
     console.warn('[Firestore] Advertencia al guardar metadatos de anexo en Firestore:', error);
@@ -286,8 +321,7 @@ export async function getLobatosByAdulto(adultoId: string, registroAsp?: string)
         const matchesAsp = Boolean(
           cleanAlphaNum && (
             lobCleanAsp === cleanAlphaNum ||
-            (cleanAlphaNum.length >= 4 && lobCleanAsp.includes(cleanAlphaNum)) ||
-            (lobCleanAsp.length >= 4 && cleanAlphaNum.includes(lobCleanAsp))
+            (digitsOnly && (lobCleanAsp === `ASP${digitsOnly}` || lobAsp === `ASP-${digitsOnly}` || lobCleanAsp === digitsOnly))
           )
         );
 
@@ -320,10 +354,36 @@ export async function saveLobatoToFirestore(lobato: Lobato): Promise<void> {
   };
 
   const docRef = doc(db, LOBATOS_COLLECTION, normalizedLobato.id);
-  await setDoc(docRef, {
+  const dataToSave = cleanObjectForFirestore({
     ...normalizedLobato,
     updatedAt: serverTimestamp(),
-  }, { merge: true });
+    fechaRegistro: (lobato as any).fechaRegistro || new Date().toISOString(),
+  });
+
+  await setDoc(docRef, dataToSave, { merge: true });
+
+  // Si existe un anexo 4 asociado por ID en la colección documentos_anexos, vincularlo
+  if (normalizedLobato.permisoPadreAnexo4DocId) {
+    try {
+      const anexoDocRef = doc(db, ANEXOS_COLLECTION, normalizedLobato.permisoPadreAnexo4DocId);
+      await updateDoc(anexoDocRef, cleanObjectForFirestore({
+        asociadoAId: normalizedLobato.id,
+        lobatoNombre: `${normalizedLobato.nombres} ${normalizedLobato.apellidos}`.trim(),
+        adultoId: normalizedLobato.adultoId,
+        adultoAsp: normalizedLobato.adultoAsp,
+        updatedAt: serverTimestamp(),
+      }));
+    } catch (anexoErr) {
+      console.warn('[Firestore] Advertencia al vincular documento anexo 4 con el lobato:', anexoErr);
+    }
+  }
+
+  if (normalizedLobato.grupoScout) {
+    saveDynamicScoutSuggestion('grupoScout', normalizedLobato.grupoScout);
+  }
+  if (normalizedLobato.ciudad) {
+    saveDynamicScoutSuggestion('region', normalizedLobato.ciudad);
+  }
 }
 
 /**
@@ -383,12 +443,24 @@ export async function getAdultosFromFirestore(): Promise<AdultoVoluntario[]> {
     const list: AdultoVoluntario[] = [];
     snapshot.forEach((d) => {
       const data = d.data() as any;
-      const fullName = data.nombre || `${data.nombres || ''} ${data.apellidos || ''}`.trim() || 'Dirigente';
+      const computedCombined = `${data.nombres || ''} ${data.apellidos || ''}`.trim();
+      const fullName = (
+        (typeof data.nombre === 'string' && data.nombre.trim() && data.nombre.toLowerCase() !== 'dirigente' && data.nombre.toLowerCase() !== 'dirigente scout' && data.nombre.trim()) ||
+        computedCombined ||
+        (typeof data.nombreCompleto === 'string' && data.nombreCompleto.trim()) ||
+        (typeof data.fullName === 'string' && data.fullName.trim()) ||
+        (typeof data.adultoNombre === 'string' && data.adultoNombre.trim()) ||
+        (typeof data.name === 'string' && data.name.trim()) ||
+        (typeof data.nombre === 'string' && data.nombre.trim()) ||
+        'Dirigente Scout'
+      );
       const cleanAsp = (data.registroAsp || '').trim().toUpperCase();
       list.push({
         ...data,
         id: d.id,
         nombre: fullName,
+        nombres: data.nombres || '',
+        apellidos: data.apellidos || '',
         registroAsp: cleanAsp,
       } as AdultoVoluntario);
     });
@@ -402,8 +474,8 @@ export async function getAdultosFromFirestore(): Promise<AdultoVoluntario[]> {
 /**
  * Registra o guarda un nuevo dirigente en Firestore
  */
-export async function saveAdultoToFirestore(adulto: AdultoVoluntario | DirigenteRegistro): Promise<void> {
-  const id = adulto.id || `adv_${Date.now()}`;
+export async function saveAdultoToFirestore(adulto: AdultoVoluntario | DirigenteRegistro): Promise<string> {
+  const id = adulto.id || `dir-${Date.now()}`;
   const docRef = doc(db, ADULTOS_COLLECTION, id);
   const fullName = ('nombre' in adulto && adulto.nombre)
     ? adulto.nombre
@@ -412,12 +484,252 @@ export async function saveAdultoToFirestore(adulto: AdultoVoluntario | Dirigente
   const digits = cleanAsp.replace(/[^0-9]/g, '');
   const standardAsp = digits ? `ASP-${digits}` : cleanAsp;
 
-  await setDoc(docRef, {
+  const dataToSave = cleanObjectForFirestore({
     ...adulto,
     id,
     nombre: fullName,
     registroAsp: standardAsp,
+    createdAt: (adulto as any).createdAt || serverTimestamp(),
     updatedAt: serverTimestamp(),
-  }, { merge: true });
+    fechaRegistro: (adulto as any).fechaRegistro || new Date().toISOString(),
+  });
+
+  console.log('[Firestore] Guardando dirigente en base de datos:', id, {
+    nombre: fullName,
+    registroAsp: standardAsp,
+    cargo: (adulto as any).cargo,
+  });
+
+  await setDoc(docRef, dataToSave, { merge: true });
+
+  // Si tiene archivoAnexo3DocId o voucherPagoDocId, vincularlos en documentos_anexos
+  if ((adulto as any).archivoAnexo3DocId) {
+    try {
+      const anexoRef = doc(db, ANEXOS_COLLECTION, (adulto as any).archivoAnexo3DocId);
+      await updateDoc(anexoRef, {
+        adultoId: id,
+        dirigenteNombre: fullName,
+        dirigenteAsp: standardAsp,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (anexoErr) {
+      console.warn('[Firestore] No se pudo vincular archivoAnexo3DocId:', (adulto as any).archivoAnexo3DocId, anexoErr);
+    }
+  }
+
+  if ((adulto as any).voucherPagoDocId) {
+    try {
+      const voucherRef = doc(db, ANEXOS_COLLECTION, (adulto as any).voucherPagoDocId);
+      await updateDoc(voucherRef, {
+        adultoId: id,
+        dirigenteNombre: fullName,
+        dirigenteAsp: standardAsp,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (voucherErr) {
+      console.warn('[Firestore] No se pudo vincular voucherPagoDocId:', (adulto as any).voucherPagoDocId, voucherErr);
+    }
+  }
+
+  console.log('[Firestore] ✓ Dirigente guardado exitosamente en colección "adultos":', id);
+
+  const gs = (adulto.grupoScout || (adulto as any).unidad || '').trim();
+  const reg = (adulto.ciudad || (adulto as any).localidad || (adulto as any).region || '').trim();
+  if (gs) saveDynamicScoutSuggestion('grupoScout', gs);
+  if (reg) saveDynamicScoutSuggestion('region', reg);
+
+  return id;
 }
+
+// Catálogos base de respaldo para grupos scout
+const GRUPOS_SCOUT_BASE = [
+  'Lima 02',
+  'Arequipa 14',
+  'Trujillo 05',
+  'Cusco 08',
+  'Callao 21',
+  'Chiclayo 12',
+  'Piura 03',
+  'Lima 19',
+  'Huancayo 33',
+  'Tacna 07',
+  'Ica 25',
+  'Iquitos 41',
+  'Lima 50',
+  'Arequipa 64',
+  'Trujillo 72',
+  'Chimbote 88',
+  'Lima 104',
+  'Puno 120',
+  'Miraflores 51',
+  'San Borja 114',
+  'Santiago de Surco 80',
+  'San Isidro 15',
+  'Barranco 13',
+  'Surco 184',
+  'La Molina 130',
+  'Pueblo Libre 105',
+  'San Miguel 36',
+  'Chorrillos 291',
+];
+
+export interface ScoutFieldSuggestions {
+  gruposScout: string[];
+  regiones: string[];
+  fromDatabaseGrupos: string[];
+  fromDatabaseRegiones: string[];
+}
+
+let cachedSuggestions: ScoutFieldSuggestions | null = null;
+let lastFetchTime = 0;
+const CACHE_TTL_MS = 60 * 1000; // 1 minuto
+
+/**
+ * Obtiene las sugerencias unificadas de Grupo Scout y Región - Localidad
+ * a partir de los registros previos reales en Firestore (adultos y lobatos),
+ * el almacenamiento dinámico local y los catálogos base.
+ */
+export async function getScoutFieldSuggestions(forceRefresh = false): Promise<ScoutFieldSuggestions> {
+  const now = Date.now();
+  if (!forceRefresh && cachedSuggestions && now - lastFetchTime < CACHE_TTL_MS) {
+    return cachedSuggestions;
+  }
+
+  const gruposSet = new Set<string>();
+  const regionesSet = new Set<string>();
+  const dbGrupos = new Set<string>();
+  const dbRegiones = new Set<string>();
+
+  // 1. Cargar desde base de datos Firestore (adultos)
+  try {
+    const adultosSnap = await getDocs(collection(db, ADULTOS_COLLECTION));
+    adultosSnap.forEach((d) => {
+      const data = d.data() as any;
+      const gs = (data.grupoScout || data.unidad || '').trim();
+      const reg = (data.ciudad || data.localidad || data.region || '').trim();
+      if (gs && gs.length >= 2) {
+        gruposSet.add(gs);
+        dbGrupos.add(gs);
+      }
+      if (reg && reg.length >= 2) {
+        regionesSet.add(reg);
+        dbRegiones.add(reg);
+      }
+    });
+  } catch (err) {
+    console.warn('Error fetching grupos/regiones from adultos in Firestore:', err);
+  }
+
+  // 2. Cargar desde base de datos Firestore (lobatos)
+  try {
+    const lobatosSnap = await getDocs(collection(db, LOBATOS_COLLECTION));
+    lobatosSnap.forEach((d) => {
+      const data = d.data() as any;
+      const gs = (data.grupoScout || data.unidad || '').trim();
+      const reg = (data.ciudad || data.localidad || '').trim();
+      if (gs && gs.length >= 2) {
+        gruposSet.add(gs);
+        dbGrupos.add(gs);
+      }
+      if (reg && reg.length >= 2) {
+        regionesSet.add(reg);
+        dbRegiones.add(reg);
+      }
+    });
+  } catch (err) {
+    console.warn('Error fetching grupos/regiones from lobatos in Firestore:', err);
+  }
+
+  // 3. Cargar registros dinámicos previos guardados en localStorage
+  try {
+    const localGrupos = JSON.parse(localStorage.getItem('scout_custom_grupos') || '[]');
+    if (Array.isArray(localGrupos)) {
+      localGrupos.forEach((g: string) => {
+        if (typeof g === 'string' && g.trim()) {
+          gruposSet.add(g.trim());
+          dbGrupos.add(g.trim());
+        }
+      });
+    }
+    const localRegiones = JSON.parse(localStorage.getItem('scout_custom_regiones') || '[]');
+    if (Array.isArray(localRegiones)) {
+      localRegiones.forEach((r: string) => {
+        if (typeof r === 'string' && r.trim()) {
+          regionesSet.add(r.trim());
+          dbRegiones.add(r.trim());
+        }
+      });
+    }
+  } catch {}
+
+  // 4. Agregar grupos scout base de respaldo
+  GRUPOS_SCOUT_BASE.forEach((g) => gruposSet.add(g));
+
+  // 5. Agregar regiones oficiales
+  REGIONES_LOCALIDADES_SCOUT.forEach((r) => regionesSet.add(r.nombre));
+
+  // Ordenar priorizando los que vienen de registros previos reales
+  const sortedGrupos = Array.from(gruposSet).sort((a, b) => {
+    const aInDb = dbGrupos.has(a);
+    const bInDb = dbGrupos.has(b);
+    if (aInDb && !bInDb) return -1;
+    if (!aInDb && bInDb) return 1;
+    return a.localeCompare(b, undefined, { sensitivity: 'base' });
+  });
+
+  const sortedRegiones = Array.from(regionesSet).sort((a, b) => {
+    const aInDb = dbRegiones.has(a);
+    const bInDb = dbRegiones.has(b);
+    if (aInDb && !bInDb) return -1;
+    if (!aInDb && bInDb) return 1;
+    return a.localeCompare(b, undefined, { sensitivity: 'base' });
+  });
+
+  cachedSuggestions = {
+    gruposScout: sortedGrupos,
+    regiones: sortedRegiones,
+    fromDatabaseGrupos: Array.from(dbGrupos),
+    fromDatabaseRegiones: Array.from(dbRegiones),
+  };
+  lastFetchTime = now;
+
+  return cachedSuggestions;
+}
+
+/**
+ * Guarda inmediatamente un nuevo valor en el catálogo de sugerencias del usuario
+ */
+export function saveDynamicScoutSuggestion(type: 'grupoScout' | 'region', value: string): void {
+  const clean = value.trim();
+  if (!clean || clean.length < 2) return;
+
+  const storageKey = type === 'grupoScout' ? 'scout_custom_grupos' : 'scout_custom_regiones';
+  try {
+    const existing = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    const list = Array.isArray(existing) ? existing : [];
+    if (!list.some((item: string) => item.toLowerCase() === clean.toLowerCase())) {
+      list.push(clean);
+      localStorage.setItem(storageKey, JSON.stringify(list));
+    }
+  } catch {}
+
+  if (cachedSuggestions) {
+    if (type === 'grupoScout') {
+      if (!cachedSuggestions.gruposScout.some((g) => g.toLowerCase() === clean.toLowerCase())) {
+        cachedSuggestions.gruposScout.unshift(clean);
+      }
+      if (!cachedSuggestions.fromDatabaseGrupos.includes(clean)) {
+        cachedSuggestions.fromDatabaseGrupos.unshift(clean);
+      }
+    } else {
+      if (!cachedSuggestions.regiones.some((r) => r.toLowerCase() === clean.toLowerCase())) {
+        cachedSuggestions.regiones.unshift(clean);
+      }
+      if (!cachedSuggestions.fromDatabaseRegiones.includes(clean)) {
+        cachedSuggestions.fromDatabaseRegiones.unshift(clean);
+      }
+    }
+  }
+}
+
 

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft,
@@ -26,11 +26,16 @@ import {
   Loader2,
 } from 'lucide-react';
 import { AdultoVoluntario, Lobato, ViewMode } from '../types';
-import { formatFechaNacimiento, calcularEdad } from '../utils/lobatoUtils';
+import { formatFechaNacimiento, calcularEdad, groupLobatosBySeisena, getSeisenaInfo } from '../utils/lobatoUtils';
 import { uploadDocumentoAnexo, saveLobatoToFirestore, getAdultosFromFirestore, getLobatosByAdulto } from '../lib/databaseService';
+import { REGIONES_LOCALIDADES_SCOUT } from '../data/regionesScout';
+import { FieldInfoTooltip } from './FieldInfoTooltip';
+import { ScoutSuggestInput } from './ScoutSuggestInput';
+import { useScoutSuggestions } from '../hooks/useScoutSuggestions';
 
 interface LobatosRegistrationScreenProps {
   onBack: () => void;
+  onGoToNicknames?: () => void;
   onOpenSummary: (adulto: AdultoVoluntario, lobatos: Lobato[]) => void;
   onEditLobato: (lobato: Lobato) => void;
   onDeleteLobato: (lobato: Lobato) => void;
@@ -42,6 +47,7 @@ interface LobatosRegistrationScreenProps {
 
 export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps> = ({
   onBack,
+  onGoToNicknames,
   onOpenSummary,
   onEditLobato,
   onDeleteLobato,
@@ -51,14 +57,91 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
   setSelectedAdulto,
 }) => {
   // ASP Search & Validation State
+  const [aspSearchType, setAspSearchType] = useState<'ASP' | 'OTRO'>('ASP');
   const [aspSearchQuery, setAspSearchQuery] = useState('');
   const [aspSearchError, setAspSearchError] = useState<string | null>(null);
   const [aspSuccessBanner, setAspSuccessBanner] = useState<string | null>(null);
   const anexo4FileInputRef = useRef<HTMLInputElement>(null);
 
+  // Sugerencias inteligentes unificadas de Grupo Scout y Región / Localidad
+  const {
+    gruposScout,
+    regiones,
+    dbGruposSet,
+    dbRegionesSet,
+    addCustomSuggestion,
+  } = useScoutSuggestions();
+
   // Limite estricto de seisena
   const MAX_SEISENA_LOBATOS = 6;
   const isSeisenaFull = lobatos.length >= MAX_SEISENA_LOBATOS;
+
+  // Lobatos ya guardados en Firestore para este dirigente (NO se muestran en el formulario de registro)
+  const [dbRegisteredLobatos, setDbRegisteredLobatos] = useState<Lobato[]>([]);
+  const [isLoadingDbLobatos, setIsLoadingDbLobatos] = useState(false);
+
+  // Cargar lobatos guardados en BD cuando cambia o existe el dirigente seleccionado
+  useEffect(() => {
+    if (selectedAdulto?.id) {
+      setIsLoadingDbLobatos(true);
+      getLobatosByAdulto(selectedAdulto.id, selectedAdulto.registroAsp)
+        .then((saved) => {
+          setDbRegisteredLobatos(saved || []);
+        })
+        .catch(() => setDbRegisteredLobatos([]))
+        .finally(() => setIsLoadingDbLobatos(false));
+    } else {
+      setDbRegisteredLobatos([]);
+    }
+  }, [selectedAdulto?.id, selectedAdulto?.registroAsp]);
+
+  const registeredSeisenas = useMemo(() => {
+    return groupLobatosBySeisena(dbRegisteredLobatos);
+  }, [dbRegisteredLobatos]);
+
+  const registeredSeisenasCount = registeredSeisenas.length;
+  const nextSeisenaNum = registeredSeisenasCount + 1;
+  const currentSeisenaInfo = useMemo(() => getSeisenaInfo(nextSeisenaNum), [nextSeisenaNum]);
+  const currentSeisenaLabel = currentSeisenaInfo.nombreCompleto;
+
+  const selectedAdultFullName = useMemo(() => {
+    if (!selectedAdulto) return '';
+    const raw = selectedAdulto as any;
+    const computedCombined = `${raw.nombres || ''} ${raw.apellidos || ''}`.trim();
+    const candidates = [
+      typeof selectedAdulto.nombre === 'string' && selectedAdulto.nombre.trim(),
+      computedCombined,
+      typeof raw.nombreCompleto === 'string' && raw.nombreCompleto.trim(),
+      typeof raw.fullName === 'string' && raw.fullName.trim(),
+      typeof raw.adultoNombre === 'string' && raw.adultoNombre.trim(),
+      typeof raw.dirigenteNombre === 'string' && raw.dirigenteNombre.trim(),
+      typeof raw.name === 'string' && raw.name.trim(),
+      typeof raw.displayName === 'string' && raw.displayName.trim(),
+    ].filter(Boolean) as string[];
+
+    const validCandidate = candidates.find(
+      (c) => c && c.toLowerCase() !== 'dirigente' && c.toLowerCase() !== 'dirigente scout'
+    );
+    if (validCandidate) return validCandidate;
+
+    // Si los lobatos guardados de este dirigente tienen su nombre
+    if (dbRegisteredLobatos.length > 0) {
+      const fromLob = dbRegisteredLobatos.find(
+        (l) => l.adultoNombre && l.adultoNombre.toLowerCase() !== 'dirigente' && l.adultoNombre.toLowerCase() !== 'dirigente scout'
+      );
+      if (fromLob?.adultoNombre) return fromLob.adultoNombre;
+    }
+
+    return candidates[0] || 'Dirigente Scout';
+  }, [selectedAdulto, dbRegisteredLobatos]);
+
+  const existingDnis = useMemo(() => {
+    const set = new Set<string>();
+    dbRegisteredLobatos.forEach((l) => {
+      if (l.dni) set.add(l.dni.trim());
+    });
+    return set;
+  }, [dbRegisteredLobatos]);
 
   // New Lobato Form State (strictly empty initially)
   const [formNombres, setFormNombres] = useState('');
@@ -70,7 +153,10 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
   const [formRoblox, setFormRoblox] = useState('');
   const [formAnexo4, setFormAnexo4] = useState('');
   const [formAnexo4FileName, setFormAnexo4FileName] = useState('');
+  const [formAnexo4FileSize, setFormAnexo4FileSize] = useState('');
+  const [formAnexo4DocId, setFormAnexo4DocId] = useState('');
   const [isUploadingAnexo4, setIsUploadingAnexo4] = useState(false);
+  const [isDraggingAnexo4, setIsDraggingAnexo4] = useState(false);
   const [anexo4StatusNotice, setAnexo4StatusNotice] = useState<{
     type: 'success' | 'warning' | 'error';
     message: string;
@@ -121,53 +207,51 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
     !isUploadingAnexo4
   );
 
-  // Validate ASP Code
+  // Validate ASP Code or International Scout Code
   const handleValidateAsp = (aspToTest?: string) => {
-    const raw = (aspToTest !== undefined ? aspToTest : aspSearchQuery).trim().toUpperCase();
+    const rawVal = (aspToTest !== undefined ? aspToTest : aspSearchQuery).trim();
     setAspSearchError(null);
     setAspSuccessBanner(null);
 
-    if (!raw) {
-      setAspSearchError('Por favor ingresa el código o registro ASP del dirigente (ej. ASP-00125).');
+    if (!rawVal) {
+      setAspSearchError(
+        aspSearchType === 'ASP'
+          ? 'Por favor ingresa los números de tu Registro ASP (ej. 202021).'
+          : 'Por favor ingresa tu código scout registrado.'
+      );
       return;
     }
 
-    const cleanInput = raw.replace(/[^A-Z0-9]/g, '');
-    const found = adultosList.find((adult) => {
-      const cleanAdultAsp = (adult.registroAsp || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const inputDigits = rawVal.replace(/[^0-9]/g, '');
+    const cleanRawUpper = rawVal.toUpperCase();
+    const expectedStandard = inputDigits ? `ASP-${inputDigits}` : cleanRawUpper;
+
+    // Búsqueda por coincidencia ESTRICTA y EXACTA (sin includes ni coincidencias parciales)
+    const found = adultosList.find((adult: AdultoVoluntario) => {
+      const adultRaw = (adult.registroAsp || '').trim().toUpperCase();
+      const adultDigits = adultRaw.replace(/[^0-9]/g, '');
       return (
-        (adult.registroAsp || '').toUpperCase() === raw ||
-        cleanAdultAsp === cleanInput ||
-        cleanAdultAsp.includes(cleanInput) ||
-        cleanInput.includes(cleanAdultAsp)
+        (adultDigits !== '' && adultDigits === inputDigits) ||
+        adultRaw === expectedStandard ||
+        adultRaw === `ASP${inputDigits}` ||
+        adultRaw === cleanRawUpper
       );
     });
 
     if (found) {
-      // Al validar un nuevo dirigente, asegurar que el formulario y la grilla comiencen limpios
-      // Solo cargar el borrador local si pertenece a este código ASP en particular
-      if (!selectedAdulto || selectedAdulto.id !== found.id) {
-        const cleanAspKey = (found.registroAsp || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-        const savedDraft = cleanAspKey ? sessionStorage.getItem(`draft_seisena_${cleanAspKey}`) : null;
-        if (savedDraft) {
-          try {
-            const parsed = JSON.parse(savedDraft);
-            setLobatos(Array.isArray(parsed) ? parsed : []);
-          } catch {
-            setLobatos([]);
-          }
-        } else {
-          // Si no hay borrador en sesión, consultar si ya tiene lobatos registrados en Firestore
-          getLobatosByAdulto(found.id, found.registroAsp).then((saved) => {
-            if (saved && saved.length > 0) {
-              setLobatos(saved);
-            } else {
-              setLobatos([]);
-            }
-          }).catch(() => setLobatos([]));
-        }
-      }
       setSelectedAdulto(found);
+      // El formulario y la lista de seisena siempre inician VACÍOS para registrar la nueva seisena
+      setLobatos([]);
+
+      // Consultar lobatos que ya están guardados en la base de datos para este dirigente (NO se muestran en el formulario)
+      setIsLoadingDbLobatos(true);
+      getLobatosByAdulto(found.id, found.registroAsp)
+        .then((saved) => {
+          setDbRegisteredLobatos(saved || []);
+        })
+        .catch(() => setDbRegisteredLobatos([]))
+        .finally(() => setIsLoadingDbLobatos(false));
+
       // Los campos de grupo y ciudad del nuevo lobato DEBEN iniciar estrictamente en blanco
       setFormGrupoScout('');
       setFormCiudad('');
@@ -183,18 +267,20 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
       setFormErrors({});
       setAspSearchQuery('');
       setAspSearchError(null);
-      setAspSuccessBanner(`✓ OK: ¡Dirigente ${found.nombre} verificado exitosamente (${found.registroAsp})!`);
+      const foundFullName = found.nombre?.trim() || `${(found as any).nombres || ''} ${(found as any).apellidos || ''}`.trim() || 'Dirigente';
+      setAspSuccessBanner(`✓ ¡Dirigente ${foundFullName} verificado exitosamente (${found.registroAsp})!`);
       setTimeout(() => {
         setAspSuccessBanner(null);
       }, 4500);
     } else {
-      setAspSearchError(`❌ El código ASP "${raw}" no se encuentra registrado en el sistema. Verifica el número e intenta nuevamente.`);
+      setAspSearchError(`❌ El código ASP-${inputDigits} no coincide con ningún dirigente registrado. Verifica el número exacto e intenta nuevamente.`);
     }
   };
 
   const handleClearAdult = () => {
     setSelectedAdulto(null);
     setLobatos([]);
+    setDbRegisteredLobatos([]);
     setFormNombres('');
     setFormApellidos('');
     setFormDni('');
@@ -204,7 +290,10 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
     setFormRoblox('');
     setFormAnexo4('');
     setFormAnexo4FileName('');
+    setFormAnexo4FileSize('');
+    setFormAnexo4DocId('');
     setIsUploadingAnexo4(false);
+    setIsDraggingAnexo4(false);
     setAnexo4StatusNotice(null);
     setFormErrors({});
     setAspSearchQuery('');
@@ -215,46 +304,69 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
     }
   };
 
-  const handleAnexo4File = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setFormAnexo4FileName(file.name);
-      setIsUploadingAnexo4(true);
-      setAnexo4StatusNotice(null);
-      try {
-        const uploadResult = await uploadDocumentoAnexo('ANEXO_4_LOBATO', file);
-        const uploadedUrl = uploadResult.meta?.downloadUrl || uploadResult.meta?.dataUrl || '';
-        if (uploadResult.success && uploadedUrl) {
-          setFormAnexo4(uploadedUrl);
-          setAnexo4StatusNotice({
-            type: 'success',
-            message: `✓ Guardado en Google Cloud Storage (${file.name})`,
-          });
-        } else if (uploadedUrl) {
-          setFormAnexo4(uploadedUrl);
-          setAnexo4StatusNotice({
-            type: 'success',
-            message: `✓ Documento procesado y respaldado (${file.name})`,
-          });
-        } else {
-          setFormAnexo4('');
-          setFormAnexo4FileName('');
-          setAnexo4StatusNotice({
-            type: 'error',
-            message: `❌ Falló la subida: ${uploadResult.error || 'No se pudo obtener la URL de descarga'}`,
-          });
-        }
-      } catch (err: any) {
-        console.error('[LobatosRegistration] Error al subir anexo 4:', err);
+  const processAnexo4File = async (file: File) => {
+    if (!file) return;
+    const formattedSize = file.size > 1024 * 1024
+      ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+      : `${(file.size / 1024).toFixed(0)} KB`;
+    setFormAnexo4FileName(file.name);
+    setFormAnexo4FileSize(formattedSize);
+    setIsUploadingAnexo4(true);
+    setAnexo4StatusNotice(null);
+    if (formErrors.anexo4) {
+      setFormErrors((prev) => {
+        const next = { ...prev };
+        delete next.anexo4;
+        return next;
+      });
+    }
+
+    try {
+      const uploadResult = await uploadDocumentoAnexo('ANEXO_4_LOBATO', file, selectedAdulto?.id);
+      const uploadedUrl = uploadResult.meta?.downloadUrl || uploadResult.meta?.dataUrl || '';
+      if (uploadResult.success && uploadedUrl) {
+        setFormAnexo4(uploadedUrl);
+        setFormAnexo4DocId(uploadResult.meta.id);
+        setAnexo4StatusNotice({
+          type: 'success',
+          message: `✓ Permiso Anexo 4 guardado en Google Cloud Storage (${file.name} • ${formattedSize})`,
+        });
+      } else if (uploadedUrl) {
+        setFormAnexo4(uploadedUrl);
+        setFormAnexo4DocId(uploadResult.meta.id);
+        setAnexo4StatusNotice({
+          type: 'success',
+          message: `✓ Documento procesado y respaldado (${file.name} • ${formattedSize})`,
+        });
+      } else {
         setFormAnexo4('');
         setFormAnexo4FileName('');
+        setFormAnexo4FileSize('');
+        setFormAnexo4DocId('');
         setAnexo4StatusNotice({
           type: 'error',
-          message: `❌ Error al subir: ${err?.message || String(err)}`,
+          message: `❌ Falló la subida: ${uploadResult.error || 'No se pudo obtener la URL de descarga'}`,
         });
-      } finally {
-        setIsUploadingAnexo4(false);
       }
+    } catch (err: any) {
+      console.error('[LobatosRegistration] Error al subir anexo 4:', err);
+      setFormAnexo4('');
+      setFormAnexo4FileName('');
+      setFormAnexo4FileSize('');
+      setFormAnexo4DocId('');
+      setAnexo4StatusNotice({
+        type: 'error',
+        message: `❌ Error al subir: ${err?.message || String(err)}`,
+      });
+    } finally {
+      setIsUploadingAnexo4(false);
+    }
+  };
+
+  const handleAnexo4File = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processAnexo4File(file);
     }
   };
 
@@ -273,12 +385,20 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
     if (!formApellidos.trim()) errors.apellidos = 'Ingresa los apellidos';
     if (!formDni.trim()) errors.dni = 'Ingresa el DNI / Identificación';
     if (!formFechaNac.trim()) errors.fechaNacimiento = 'Selecciona la fecha de nacimiento';
-    if (!formGrupoScout.trim()) errors.grupoScout = 'Ingresa el grupo scout';
-    if (!formCiudad.trim()) errors.ciudad = 'Ingresa la ciudad';
+    if (!formGrupoScout.trim()) errors.grupoScout = 'Ingresa el Grupo Scout y numeral (ej. Lima 02)';
+    if (!formCiudad.trim()) errors.ciudad = 'Ingresa la Región - Localidad (ej. Arequipa Sur XI)';
     if (!formAnexo4.trim()) {
       errors.anexo4 = 'Obligatorio: debes subir el archivo del Anexo 4 (Permiso del Padre/Tutor)';
     } else if (isUploadingAnexo4) {
       errors.anexo4 = 'Por favor espera a que termine de subirse el archivo Anexo 4';
+    }
+
+    if (formDni.trim()) {
+      if (existingDnis.has(formDni.trim())) {
+        errors.dni = `Este lobato (DNI: ${formDni.trim()}) ya fue registrado en una seisena previa en la base de datos.`;
+      } else if (lobatos.some((l) => l.dni.trim() === formDni.trim())) {
+        errors.dni = `Este DNI (${formDni.trim()}) ya está agregado en la seisena actual.`;
+      }
     }
 
     if (Object.keys(errors).length > 0) {
@@ -295,6 +415,11 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
     const adultFullName = selectedAdulto.nombre 
       || `${(selectedAdulto as any).nombres || ''} ${(selectedAdulto as any).apellidos || ''}`.trim() || 'Dirigente';
 
+    const cleanNick = formRoblox.replace(/^@+/, '').trim();
+    const finalRobloxNick = cleanNick 
+      ? (cleanNick.startsWith('@') ? cleanNick : `@${cleanNick}`)
+      : `@Scout_${formNombres.split(' ')[0].toLowerCase()}26`;
+
     const newLobato: Lobato = {
       id: 'lob-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
       orden: lobatos.length + 1,
@@ -302,22 +427,27 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
       apellidos: formApellidos.trim(),
       dni: formDni.trim(),
       fechaNacimiento: formFechaNac.trim(),
-      nicknameRoblox: formRoblox.trim() || `Scout_${formNombres.split(' ')[0]}26`,
+      nicknameRoblox: finalRobloxNick,
       grupoScout: formGrupoScout.trim(),
       ciudad: formCiudad.trim(),
       unidad: formGrupoScout.trim(),
       permisoPadreAnexo4: formAnexo4.trim(), // URL estricta y real del documento
+      permisoPadreAnexo4Name: formAnexo4FileName.trim(),
+      permisoPadreAnexo4Size: formAnexo4FileSize.trim(),
+      permisoPadreAnexo4DocId: formAnexo4DocId.trim(),
       adultoId: selectedAdulto.id,
       adultoNombre: adultFullName,
       adultoAsp: standardAsp,
       createdAt: Date.now(),
-      seisena: 'Seisena 1',
+      seisena: currentSeisenaLabel,
     };
 
-    // Guardar inmediatamente en Firestore para garantizar persistencia duradera
-    saveLobatoToFirestore(newLobato).catch((err) => {
-      console.warn('Error guardando lobato en Firestore:', err);
-    });
+    if (formGrupoScout.trim()) {
+      addCustomSuggestion('grupoScout', formGrupoScout.trim());
+    }
+    if (formCiudad.trim()) {
+      addCustomSuggestion('region', formCiudad.trim());
+    }
 
     setLobatos((prev) => {
       const next = [...prev, newLobato];
@@ -338,7 +468,10 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
     setFormRoblox('');
     setFormAnexo4('');
     setFormAnexo4FileName('');
+    setFormAnexo4FileSize('');
+    setFormAnexo4DocId('');
     setIsUploadingAnexo4(false);
+    setIsDraggingAnexo4(false);
     setAnexo4StatusNotice(null);
     setFormErrors({});
     if (anexo4FileInputRef.current) {
@@ -346,7 +479,7 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
     }
 
     // Mostrar mensaje de éxito temporal
-    setSuccessBanner(`✓ Lobato #${String(newLobato.orden).padStart(2, '0')} agregado a la seisena (${lobatos.length + 1}/6).`);
+    setSuccessBanner(`✓ Lobato #${String(newLobato.orden).padStart(2, '0')} agregado a la ${currentSeisenaLabel} (${lobatos.length + 1}/6).`);
     setTimeout(() => {
       setSuccessBanner(null);
     }, 4000);
@@ -421,7 +554,7 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
             </div>
 
             <p className="text-xs sm:text-sm text-slate-700 font-semibold mb-4 leading-relaxed">
-              Para habilitar el ingreso de lobatos, debes identificar y autenticar al adulto voluntario o dirigente a cargo ingresando su <strong>Código ASP</strong> (Asociación de Scouts del Perú).
+              Para habilitar el ingreso de lobatos, debes identificar y autenticar al adulto voluntario o dirigente a cargo ingresando su <strong>Código ASP</strong> (Scouts del Perú) o <strong>Código Scout</strong> internacional.
             </p>
 
             {/* Search by ASP form */}
@@ -432,15 +565,76 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
               }}
               className="space-y-3"
             >
-              <label className="block text-xs font-bold uppercase text-slate-900 font-game">
-                Código / Registro ASP del Dirigente <span className="text-red-500">*</span>
-              </label>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center">
+                  <label className="block text-xs font-bold uppercase text-slate-900 font-game">
+                    Código ASP / Scout del Dirigente <span className="text-red-500">*</span>
+                  </label>
+                  <FieldInfoTooltip
+                    title="Código ASP o Scout"
+                    content="Si perteneces a Scouts del Perú, ingresa los números de tu Registro ASP. Si eres de otro país, selecciona 'Otro País' e ingresa el código scout registrado por tu asociación."
+                  />
+                </div>
+
+                {/* Selector tipo toggle */}
+                <div className="inline-flex p-1 rounded-xl bg-slate-200 border-2 border-black text-xs font-bold shadow-[1px_1px_0_#000]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAspSearchType('ASP');
+                      setAspSearchQuery('');
+                      setAspSearchError(null);
+                    }}
+                    className={`px-3 py-1 rounded-lg transition-all text-xs font-bold cursor-pointer flex items-center gap-1.5 ${
+                      aspSearchType === 'ASP'
+                        ? 'bg-yellow-400 text-black shadow-xs font-extrabold'
+                        : 'text-slate-600 hover:text-black'
+                    }`}
+                  >
+                    <span>🇵🇪</span>
+                    <span>ASP (Perú)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAspSearchType('OTRO');
+                      setAspSearchQuery('');
+                      setAspSearchError(null);
+                    }}
+                    className={`px-3 py-1 rounded-lg transition-all text-xs font-bold cursor-pointer flex items-center gap-1.5 ${
+                      aspSearchType === 'OTRO'
+                        ? 'bg-blue-600 text-white shadow-xs font-extrabold'
+                        : 'text-slate-600 hover:text-black'
+                    }`}
+                  >
+                    <span>🌐</span>
+                    <span>Otro País (Scout)</span>
+                  </button>
+                </div>
+              </div>
 
               <div className="flex flex-col sm:flex-row gap-2.5">
-                <div className="relative flex-1">
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm pointer-events-none z-10">
-                    🔍
-                  </span>
+                {aspSearchType === 'ASP' ? (
+                  <div className="flex rounded-xl overflow-hidden border-3 border-black shadow-[3px_3px_0_#000] bg-white flex-1 focus-within:ring-3 focus-within:ring-yellow-400">
+                    <div className="bg-yellow-400 text-black font-game font-extrabold px-3.5 py-3 border-r-3 border-black flex items-center justify-center select-none text-base sm:text-lg tracking-wider shrink-0">
+                      ASP-
+                    </div>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={aspSearchQuery}
+                      onChange={(e) => {
+                        const onlyDigits = e.target.value.replace(/[^0-9]/g, '');
+                        setAspSearchQuery(onlyDigits);
+                        setAspSearchError(null);
+                      }}
+                      placeholder="Solo números (ej. 202021)"
+                      className="flex-1 px-4 py-3 text-base sm:text-lg font-bold font-mono text-slate-900 focus:outline-none placeholder:text-slate-400 placeholder:font-sans placeholder:text-sm"
+                      autoFocus
+                    />
+                  </div>
+                ) : (
                   <input
                     type="text"
                     value={aspSearchQuery}
@@ -448,18 +642,18 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
                       setAspSearchQuery(e.target.value);
                       setAspSearchError(null);
                     }}
-                    placeholder="Ingresa el código ASP (ej. ASP-00125 o 00125)..."
-                    className="input-3d input-with-icon-left !pl-12 text-base font-bold text-blue-950 uppercase"
+                    placeholder="Ingresa el código o número scout de tu país"
+                    className="input-3d flex-1 text-base sm:text-lg font-bold font-mono py-3"
                     autoFocus
                   />
-                </div>
+                )}
 
                 <button
                   type="submit"
-                  className="btn-3d btn-blue py-2.5 px-6 text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center justify-center gap-2 shrink-0 shadow-[2px_2px_0_#000]"
+                  className="btn-3d btn-blue py-3 px-6 text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center justify-center gap-2 shrink-0 shadow-[2px_2px_0_#000]"
                 >
                   <Check className="w-4 h-4" />
-                  <span>Validar Código ASP</span>
+                  <span>Validar Código</span>
                 </button>
               </div>
 
@@ -521,8 +715,8 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
               initial={{ scale: 0.98, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               className="
-                win-3d p-4 sm:p-5 bg-slate-900 text-white
-                border-b-8 border-black flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4
+                rounded-2xl border-4 border-black bg-slate-900 text-white p-4 sm:p-5
+                shadow-[6px_6px_0_#000] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4
                 w-full max-w-full overflow-hidden
               "
             >
@@ -532,40 +726,34 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
                 </div>
 
                 <div className="min-w-0 flex-1">
+                  {/* Tipo / Cargo */}
                   <div className="flex items-center gap-2 flex-wrap mb-1">
-                    <span className="bg-emerald-400 text-black border border-black font-game text-[11px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md flex items-center gap-1 shadow-[1px_1px_0_#000]">
-                      ✓ OK: DIRIGENTE REGISTRADO
-                    </span>
-                    <span className="bg-yellow-400 text-black border border-black font-game text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md">
+                    <span className="bg-yellow-400 text-black border-2 border-black font-game text-[11px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md shadow-[1px_1px_0_#000]">
                       {selectedAdulto.cargo || 'DIRIGENTE A CARGO'}
                     </span>
                   </div>
 
-                  <div className="font-game font-bold text-lg sm:text-2xl uppercase tracking-wide truncate text-white">
-                    {selectedAdulto.nombre}
-                  </div>
+                  {/* Nombre Completo del Dirigente - Alto Contraste y Siempre Visible */}
+                  <h3 className="font-game font-extrabold text-xl sm:text-2xl uppercase tracking-wide text-yellow-400 drop-shadow-[1px_1px_0_#000] break-words">
+                    {selectedAdultFullName}
+                  </h3>
 
-                  <div className="text-xs text-slate-300 font-semibold uppercase tracking-wider flex items-center gap-2 flex-wrap mt-0.5 min-w-0">
-                    <span className="bg-black/50 px-2 py-0.5 rounded font-mono font-bold text-yellow-300">
-                      ASP: {selectedAdulto.registroAsp}
+                  {/* Datos estrictos: Código, GS y Localidad o Ciudad */}
+                  <div className="text-xs text-slate-300 font-semibold uppercase tracking-wider flex items-center gap-2 flex-wrap mt-1 min-w-0">
+                    <span className="bg-black/60 px-2.5 py-0.5 rounded font-mono font-bold text-yellow-300 border border-yellow-400/40 shadow-[1px_1px_0_#000]">
+                      Código: {selectedAdulto.registroAsp}
                     </span>
-                    <span>|</span>
-                    <span className="truncate max-w-[200px]">Grupo Scout: {selectedAdulto.grupoScout || selectedAdulto.unidad}</span>
-                    <span>|</span>
-                    <span className="truncate max-w-[150px]">Ciudad: {selectedAdulto.ciudad || selectedAdulto.localidad}</span>
-                    {selectedAdulto.archivoAnexo3 && (
-                      <span className="flex items-center gap-1 min-w-0">
-                        | <span className="text-yellow-300 font-bold truncate max-w-[200px]" title={selectedAdulto.archivoAnexo3}>
-                          📄 {selectedAdulto.archivoAnexo3.startsWith('http') ? 'Anexo 3 (Adjunto)' : selectedAdulto.archivoAnexo3}
+                    <span className="text-slate-500">•</span>
+                    <span className="text-slate-100 font-bold truncate max-w-[240px]">
+                      GS: {selectedAdulto.grupoScout || selectedAdulto.unidad || 'Sin especificar'}
+                    </span>
+                    {(selectedAdulto.ciudad || selectedAdulto.localidad) && (
+                      <>
+                        <span className="text-slate-500">•</span>
+                        <span className="text-slate-300 truncate max-w-[180px]">
+                          {selectedAdulto.ciudad || selectedAdulto.localidad}
                         </span>
-                      </span>
-                    )}
-                    {selectedAdulto.voucherPago && (
-                      <span className="flex items-center gap-1 min-w-0">
-                        | <span className="text-emerald-300 font-bold truncate max-w-[200px]" title={selectedAdulto.voucherPagoName || selectedAdulto.voucherPago}>
-                          💳 {selectedAdulto.voucherPagoName || (selectedAdulto.voucherPago.startsWith('http') ? 'Voucher (Adjunto)' : selectedAdulto.voucherPago)}
-                        </span>
-                      </span>
+                      </>
                     )}
                   </div>
                 </div>
@@ -587,24 +775,62 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
       {/* CONTENEDOR PRINCIPAL: FORMULARIO + PARTICIPANTES */}
       {/* ============================================================ */}
       {selectedAdulto ? (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* PANEL IZQUIERDO: NUEVO LOBATO */}
-        <div className="lg:col-span-5 win-3d p-6 flex flex-col gap-4">
-          <div className="flex items-center justify-between border-b-4 border-black pb-2">
-            <h3 className="text-xl font-bold uppercase font-game text-black flex items-center gap-2">
-              <img
-                src="/assets/images/lobatos.png"
-                alt="Lobato"
-                className="w-6 h-6 rounded-full border border-black object-cover"
-              />
-              <span>Nuevo Lobato</span>
-            </h3>
-            {selectedAdulto && (
-              <span className="text-xs font-bold text-green-700 bg-green-100 border-2 border-black px-2 py-0.5 rounded-lg">
-                Listo
-              </span>
-            )}
-          </div>
+        <div className="space-y-4">
+          {/* RESUMEN MINIMALISTA DEL ESTADO DE SEISENAS PREVIAS */}
+          {isLoadingDbLobatos ? (
+            <div className="p-2.5 rounded-xl bg-blue-50 border-2 border-black text-black text-xs font-semibold flex items-center gap-2">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+              <span>Verificando estado con la base de datos...</span>
+            </div>
+          ) : dbRegisteredLobatos.length > 0 ? (
+            <div className="px-3.5 py-2 bg-slate-100 border-2 border-black rounded-xl text-black shadow-[2px_2px_0_#000] flex flex-wrap items-center justify-between gap-2 text-xs font-game">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="bg-blue-600 text-white px-2.5 py-0.5 rounded-md font-bold uppercase text-[11px]">
+                  Guardados: {dbRegisteredLobatos.length} lobatos ({registeredSeisenasCount} seisena{registeredSeisenasCount > 1 ? 's' : ''})
+                </span>
+                <span className="text-slate-700 font-bold text-[11px]">
+                  • Registrando ahora: <strong className="text-blue-900 uppercase font-extrabold">{currentSeisenaLabel}</strong>
+                </span>
+              </div>
+
+              {onGoToNicknames && (
+                <button
+                  type="button"
+                  onClick={onGoToNicknames}
+                  className="text-[11px] font-bold text-blue-700 hover:text-blue-900 hover:underline flex items-center gap-1 shrink-0"
+                >
+                  <Gamepad2 className="w-3.5 h-3.5" />
+                  <span>Ver seisenas registradas →</span>
+                </button>
+              )}
+            </div>
+          ) : null}
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* PANEL IZQUIERDO: NUEVO LOBATO */}
+          <div className="lg:col-span-5 win-3d p-6 flex flex-col gap-4">
+            <div className="flex items-center justify-between border-b-4 border-black pb-2">
+              <div className="min-w-0">
+                <h3 className="text-xl font-bold uppercase font-game text-black flex items-center gap-2">
+                  <img
+                    src="/assets/images/lobatos.png"
+                    alt="Lobato"
+                    className="w-6 h-6 rounded-full border border-black object-cover"
+                  />
+                  <span>Nuevo Lobato ({currentSeisenaLabel})</span>
+                </h3>
+                {selectedAdulto && (
+                  <p className="text-xs font-bold text-slate-700 font-game mt-0.5 truncate">
+                    Dirigente: <span className="text-blue-900 uppercase font-extrabold">{selectedAdultFullName}</span>
+                  </p>
+                )}
+              </div>
+              {selectedAdulto && (
+                <span className="text-xs font-bold text-green-700 bg-green-100 border-2 border-black px-2 py-0.5 rounded-lg shrink-0">
+                  Listo
+                </span>
+              )}
+            </div>
 
           {/* SUCCESS BANNER NOTIFICATION */}
           <AnimatePresence>
@@ -661,17 +887,23 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
             </div>
 
             {/* DNI & Roblox Nick */}
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold uppercase text-black font-game">
-                  DNI / Doc <span className="text-red-500">*</span>
-                </label>
+                <div className="flex items-center">
+                  <label className="text-xs font-bold uppercase text-black font-game">
+                    DNI / Documento <span className="text-red-500">*</span>
+                  </label>
+                  <FieldInfoTooltip
+                    title="Documento de Identidad"
+                    content="Ingresa el DNI del lobato si reside en Perú, o su número de cédula / documento nacional de identidad si es de cualquier otro país."
+                  />
+                </div>
                 <input
                   type="text"
                   disabled={!selectedAdulto}
                   value={formDni}
                   onChange={(e) => setFormDni(e.target.value)}
-                  placeholder="78291034"
+                  placeholder="Ej. 78291034 o Cédula"
                   className="input-3d"
                 />
                 {formErrors.dni && (
@@ -680,30 +912,46 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
               </div>
 
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold uppercase text-black font-game">
-                  Roblox Nick
-                </label>
-                <input
-                  type="text"
-                  disabled={!selectedAdulto}
-                  value={formRoblox}
-                  onChange={(e) => setFormRoblox(e.target.value)}
-                  placeholder="Ej. JP_Gamer26"
-                  className="input-3d"
-                />
+                <div className="flex items-center">
+                  <label className="text-xs font-bold uppercase text-black font-game">
+                    Roblox Nick
+                  </label>
+                  <FieldInfoTooltip
+                    title="Nickname de Roblox"
+                    content="Nombre de usuario del lobato en Roblox para participar en la Misión Virtual. El @ se añade automáticamente."
+                  />
+                </div>
+                <div className="relative flex items-center">
+                  <span className="absolute left-2.5 text-slate-500 font-black font-mono text-sm select-none pointer-events-none">
+                    @
+                  </span>
+                  <input
+                    type="text"
+                    disabled={!selectedAdulto}
+                    value={formRoblox.replace(/^@+/, '')}
+                    onChange={(e) => {
+                      const clean = e.target.value.replace(/^@+/, '');
+                      setFormRoblox(clean ? `@${clean}` : '');
+                    }}
+                    placeholder="akela_2809"
+                    className="input-3d !pl-7 text-xs"
+                  />
+                </div>
               </div>
             </div>
 
             {/* Fecha de Nacimiento */}
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-bold uppercase text-black font-game flex items-center justify-between">
-                <span>Fecha de Nacimiento <span className="text-red-500">*</span></span>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold uppercase text-black font-game">
+                  Fecha de Nacimiento <span className="text-red-500">*</span>
+                </label>
                 {formFechaNac && calcularEdad(formFechaNac) !== null && (
                   <span className="text-[11px] text-blue-700 font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
                     {calcularEdad(formFechaNac)} años aprox.
                   </span>
                 )}
-              </label>
+              </div>
               <input
                 type="date"
                 disabled={!selectedAdulto}
@@ -716,73 +964,114 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
               )}
             </div>
 
-            {/* Indicador de Seisena */}
-            <div className="bg-amber-50 border-2 border-black rounded-xl p-2.5 flex items-center justify-between">
-              <div>
-                <span className="text-xs font-bold uppercase text-black font-game block">
-                  🐺 Cupo de la Seisena
+            {/* Indicador de Seisena con Animal y Título Oficial */}
+            <div className="bg-amber-50 border-2 border-black rounded-xl p-3 flex items-center justify-between shadow-[2px_2px_0_#000]">
+              <div className="flex items-center gap-2.5">
+                <span className="text-2xl select-none" role="img" aria-label={currentSeisenaInfo.animal}>
+                  {currentSeisenaInfo.emoji}
                 </span>
-                <span className="text-[11px] text-slate-600 font-semibold">
-                  Máximo 6 lobatos por registro de seisena
-                </span>
+                <div>
+                  <span className="text-xs sm:text-sm font-black uppercase text-black font-game block tracking-wide">
+                    Cupo de la {currentSeisenaInfo.nombreCompleto}
+                  </span>
+                  <span className="text-[11px] text-slate-600 font-semibold">
+                    Máximo 6 lobatos por registro de seisena (Seisena #{currentSeisenaInfo.numero} de tu manada)
+                  </span>
+                </div>
               </div>
-              <span className={`px-2.5 py-1 rounded-lg border-2 border-black font-game font-bold text-xs shadow-[1px_1px_0_#000] ${
+              <span className={`px-3 py-1.5 rounded-lg border-2 border-black font-game font-extrabold text-xs sm:text-sm shadow-[1px_1px_0_#000] shrink-0 ${
                 isSeisenaFull ? 'bg-amber-400 text-black' : 'bg-white text-blue-700'
               }`}>
                 {lobatos.length} / 6 Lobatos
               </span>
             </div>
 
-            {/* Grupo Scout (Input Text - ya no combobox) */}
+            {/* Grupo Scout y numeral */}
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-bold uppercase text-black font-game flex items-center justify-between">
-                <span>Grupo Scout <span className="text-red-500">*</span></span>
-                <span className="text-[11px] text-slate-500 normal-case font-semibold">
-                  Texto libre
-                </span>
-              </label>
-              <input
-                type="text"
+              <div className="flex items-center">
+                <label className="text-xs font-bold uppercase text-black font-game">
+                  Grupo Scout y numeral <span className="text-red-500">*</span>
+                </label>
+                <FieldInfoTooltip
+                  title="Grupo Scout"
+                  content="Ingresa o selecciona el nombre del Grupo Scout y numeral asignado (ej. Lima 02, o la denominación según su país). Si no existe en la lista, puedes registrarlo por primera vez."
+                />
+              </div>
+              <ScoutSuggestInput
+                id="lobato-grupo-scout"
                 disabled={!selectedAdulto}
                 value={formGrupoScout}
-                onChange={(e) => setFormGrupoScout(e.target.value)}
-                placeholder="Ej. Grupo Scout Lima 02"
-                className="input-3d"
+                onChange={(val) => {
+                  setFormGrupoScout(val);
+                  if (formErrors.grupoScout) {
+                    setFormErrors((prev) => {
+                      const next = { ...prev };
+                      delete next.grupoScout;
+                      return next;
+                    });
+                  }
+                }}
+                placeholder="Ej. Lima 02 (o según su país)"
+                categoryType="grupoScout"
+                suggestions={gruposScout}
+                dbSuggestionsSet={dbGruposSet}
+                onBlurCustom={(val) => addCustomSuggestion('grupoScout', val)}
+                error={formErrors.grupoScout}
               />
               {formErrors.grupoScout && (
                 <p className="text-[11px] font-bold text-red-600 font-game">{formErrors.grupoScout}</p>
               )}
             </div>
 
-            {/* Ciudad (luego del campo grupo scout) */}
+            {/* Región - Localidad */}
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-bold uppercase text-black font-game flex items-center justify-between">
-                <span>Ciudad <span className="text-red-500">*</span></span>
-                <span className="text-[11px] text-slate-500 normal-case font-semibold">
-                  Localidad / Región
-                </span>
-              </label>
-              <input
-                type="text"
+              <div className="flex items-center">
+                <label className="text-xs font-bold uppercase text-black font-game">
+                  Región - Localidad <span className="text-red-500">*</span>
+                </label>
+                <FieldInfoTooltip
+                  title="Región o Localidad"
+                  content="Debe poner su región o localidad a la que pertenece acompañado de los números romanos o como se especifique según su país (ej. Arequipa Sur XI, Lima XVIII, o según su país)."
+                />
+              </div>
+              <ScoutSuggestInput
+                id="lobato-region-ciudad"
                 disabled={!selectedAdulto}
                 value={formCiudad}
-                onChange={(e) => setFormCiudad(e.target.value)}
-                placeholder="Ej. Lima, Arequipa, Cusco, Trujillo..."
-                className="input-3d"
+                onChange={(val) => {
+                  setFormCiudad(val);
+                  if (formErrors.ciudad) {
+                    setFormErrors((prev) => {
+                      const next = { ...prev };
+                      delete next.ciudad;
+                      return next;
+                    });
+                  }
+                }}
+                placeholder="Ej. Arequipa Sur XI (o según su país)"
+                categoryType="region"
+                suggestions={regiones}
+                dbSuggestionsSet={dbRegionesSet}
+                onBlurCustom={(val) => addCustomSuggestion('region', val)}
+                error={formErrors.ciudad}
               />
               {formErrors.ciudad && (
                 <p className="text-[11px] font-bold text-red-600 font-game">{formErrors.ciudad}</p>
               )}
             </div>
 
-            {/* Permiso de Padre de Familia (Anexo 4 Perú) */}
+            {/* Permiso de Padre de Familia (Anexo 4) */}
             <div className="flex flex-col gap-1 pt-1 border-t border-slate-200">
-              <label className="text-xs font-bold uppercase text-black font-game flex items-center justify-between">
-                <span className="flex items-center gap-1">
+              <div className="flex items-center">
+                <label className="text-xs font-bold uppercase text-black font-game flex items-center gap-1">
                   <FileText className="w-3.5 h-3.5 text-blue-600" />
-                  Permiso de padre de familia (Anexo 4 Perú)
-                </span>
-              </label>
+                  Permiso de padre de familia (Anexo 4)
+                </label>
+                <FieldInfoTooltip
+                  title="Permiso de Padres"
+                  content="Autorización y consentimiento firmado del padre, madre o apoderado para participar en las actividades del evento."
+                />
+              </div>
 
               <input
                 ref={anexo4FileInputRef}
@@ -796,11 +1085,28 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
               {!formAnexo4 ? (
                 <div
                   onClick={() => anexo4FileInputRef.current?.click()}
-                  className="bg-slate-50 hover:bg-slate-100 border-2 border-dashed border-black rounded-xl p-2.5 flex items-center justify-between cursor-pointer transition-colors"
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDraggingAnexo4(true);
+                  }}
+                  onDragLeave={() => setIsDraggingAnexo4(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDraggingAnexo4(false);
+                    const droppedFile = e.dataTransfer.files?.[0];
+                    if (droppedFile) {
+                      processAnexo4File(droppedFile);
+                    }
+                  }}
+                  className={`border-2 border-dashed rounded-xl p-2.5 flex items-center justify-between cursor-pointer transition-colors ${
+                    isDraggingAnexo4
+                      ? 'bg-blue-100 border-blue-600 scale-[1.01]'
+                      : 'bg-slate-50 hover:bg-slate-100 border-black'
+                  }`}
                 >
                   <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
                     <Upload className="w-4 h-4 text-black" />
-                    <span>Adjuntar Anexo 4 (PDF / Imagen) *</span>
+                    <span>{isDraggingAnexo4 ? 'Soltar archivo aquí...' : 'Adjuntar Anexo 4 (PDF / Imagen) *'}</span>
                   </div>
                   <span className="btn-3d btn-yellow py-0.5 px-2 text-[10px] shadow-[0_1px_0_#000]">
                     Subir
@@ -810,32 +1116,54 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
                 <div className="bg-emerald-50 border-2 border-black rounded-xl p-2 flex items-center justify-between gap-2 shadow-[1px_1px_0_#000]">
                   <div className="flex items-center gap-2 min-w-0">
                     <FileCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span className="font-game font-bold text-xs text-black truncate max-w-[200px]" title={formAnexo4FileName || 'Documento Anexo 4'}>
-                      {formAnexo4FileName || 'Documento Anexo 4'}
-                    </span>
+                    <div className="flex flex-col min-w-0">
+                      <span className="font-game font-bold text-xs text-black truncate max-w-[170px] sm:max-w-[220px]" title={formAnexo4FileName || 'Documento Anexo 4'}>
+                        {formAnexo4FileName || 'Documento Anexo 4'}
+                      </span>
+                      {formAnexo4FileSize && (
+                        <span className="text-[10px] text-slate-500 font-mono font-medium">
+                          {formAnexo4FileSize}
+                        </span>
+                      )}
+                    </div>
                     {isUploadingAnexo4 ? (
-                      <span className="flex items-center gap-1 text-[10px] text-blue-700 font-bold">
+                      <span className="flex items-center gap-1 text-[10px] text-blue-700 font-bold ml-1 shrink-0">
                         <Loader2 className="w-3 h-3 animate-spin" /> Subiendo...
                       </span>
                     ) : (
-                      <span className="text-[10px] text-emerald-800 font-bold">
+                      <span className="text-[10px] text-emerald-800 font-bold ml-1 shrink-0">
                         ✓ Guardado
                       </span>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFormAnexo4('');
-                      setFormAnexo4FileName('');
-                      setAnexo4StatusNotice(null);
-                      if (anexo4FileInputRef.current) anexo4FileInputRef.current.value = '';
-                    }}
-                    className="text-red-600 hover:text-red-800 font-bold text-xs p-1"
-                    title="Quitar archivo"
-                  >
-                    ✕
-                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {formAnexo4.startsWith('http') && (
+                      <a
+                        href={formAnexo4}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] font-bold text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 border border-blue-300 rounded px-1.5 py-0.5"
+                        title="Ver documento subido en pestaña nueva"
+                      >
+                        Ver ↗
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormAnexo4('');
+                        setFormAnexo4FileName('');
+                        setFormAnexo4FileSize('');
+                        setFormAnexo4DocId('');
+                        setAnexo4StatusNotice(null);
+                        if (anexo4FileInputRef.current) anexo4FileInputRef.current.value = '';
+                      }}
+                      className="text-red-600 hover:text-red-800 font-bold text-xs p-1"
+                      title="Quitar archivo"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -888,10 +1216,10 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
                 }`}
               >
                 {isSeisenaFull
-                  ? 'TOPE DE SEISENA ALCANZADO (6/6)'
+                  ? `TOPE DE ${currentSeisenaLabel.toUpperCase()} ALCANZADO (6/6)`
                   : !isFormComplete && selectedAdulto
                   ? `FALTAN DATOS O SUBIR ANEXO 4 (${lobatos.length + 1} de 6)`
-                  : `+ AGREGAR A LA SEISENA (${lobatos.length + 1} de 6)`}
+                  : `+ AGREGAR A LA ${currentSeisenaLabel.toUpperCase()} (${lobatos.length + 1} de 6)`}
               </button>
 
               {!selectedAdulto && (
@@ -914,7 +1242,8 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
           <div>
             <div className="flex justify-between items-center border-b-4 border-black pb-2 mb-3">
               <h3 className="text-xl font-bold uppercase font-game text-black flex items-center gap-2">
-                <span>🐾</span> Integrantes de la Seisena ({lobatos.length}/6)
+                <span className="text-2xl select-none">{currentSeisenaInfo.emoji}</span>
+                <span>Integrantes de {currentSeisenaInfo.nombreCompleto} ({lobatos.length}/6)</span>
               </h3>
               <div className="flex bg-slate-200 rounded-xl p-1 border-2 border-black">
                 <button
@@ -966,13 +1295,13 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
             {/* LIST OR GRID */}
             <div className="scroll-box overflow-y-auto max-h-[460px] sm:max-h-[500px] pr-2 pb-10">
               {lobatos.length === 0 ? (
-                <div className="p-8 text-center bg-slate-50 border-3 border-dashed border-black rounded-2xl">
-                  <div className="text-4xl mb-2">🧒</div>
-                  <h4 className="font-game text-base font-bold text-black uppercase">
-                    Aún no hay lobatos agregados
+                <div className="p-6 text-center bg-slate-50 border-2 border-dashed border-black rounded-xl">
+                  <div className="text-3xl mb-1 select-none">{currentSeisenaInfo.emoji}</div>
+                  <h4 className="font-game text-sm font-bold text-black uppercase">
+                    {currentSeisenaInfo.nombreCompleto} vacía (0/6)
                   </h4>
                   <p className="text-xs text-slate-500 font-semibold mt-1">
-                    Completa el formulario de la izquierda y presiona "+ AGREGAR A LA SEISENA".
+                    Completa el formulario de la izquierda para agregar integrantes a esta seisena.
                   </p>
                 </div>
               ) : viewMode === 'grid' ? (
@@ -1008,7 +1337,7 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
                           </div>
 
                           <div className="flex justify-between items-center text-xs text-blue-600 font-semibold truncate mt-1">
-                            <span>🎮 {l.nicknameRoblox || '—'}</span>
+                            <span className="font-mono">🎮 {l.nicknameRoblox ? (l.nicknameRoblox.startsWith('@') ? l.nicknameRoblox : `@${l.nicknameRoblox}`) : '—'}</span>
                             {edadCalc !== null && (
                               <span className="text-[10px] text-slate-500 font-bold">
                                 {edadCalc} años
@@ -1020,9 +1349,22 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
                           <div className="mt-1 flex items-center justify-between text-[11px] bg-slate-50 px-2 py-1 rounded border border-slate-200">
                             <span className="text-slate-600 font-bold">Permiso Padre (Anexo 4):</span>
                             {hasAnexo4 ? (
-                              <span className="text-emerald-700 font-extrabold flex items-center gap-1 truncate max-w-[120px]">
-                                ✓ Adjunto
-                              </span>
+                              l.permisoPadreAnexo4 && l.permisoPadreAnexo4.startsWith('http') ? (
+                                <a
+                                  href={l.permisoPadreAnexo4}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-emerald-700 hover:text-emerald-900 font-extrabold flex items-center gap-1 underline"
+                                  title={l.permisoPadreAnexo4Name || 'Abrir documento Anexo 4'}
+                                >
+                                  <span>✓ Adjunto</span>
+                                  <span className="text-[9px]">↗</span>
+                                </a>
+                              ) : (
+                                <span className="text-emerald-700 font-extrabold flex items-center gap-1 truncate max-w-[120px]" title={l.permisoPadreAnexo4Name || undefined}>
+                                  ✓ Adjunto
+                                </span>
+                              )
                             ) : (
                               <span className="text-red-600 font-extrabold flex items-center gap-1 truncate max-w-[120px]">
                                 ⚠️ No adjunto
@@ -1081,9 +1423,22 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
                               <span>{l.grupoScout || l.unidad} {l.ciudad ? `• ${l.ciudad}` : ''}</span>
                               <span>•</span>
                               {hasAnexo4 ? (
-                                <span className="text-emerald-700 font-extrabold text-[10px] bg-emerald-50 px-1 py-0.5 rounded border border-emerald-300">
-                                  ✓ Anexo 4
-                                </span>
+                                l.permisoPadreAnexo4 && l.permisoPadreAnexo4.startsWith('http') ? (
+                                  <a
+                                    href={l.permisoPadreAnexo4}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-emerald-700 hover:text-emerald-900 underline font-extrabold text-[10px] bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-300 flex items-center gap-0.5"
+                                    title={l.permisoPadreAnexo4Name || 'Abrir documento Anexo 4'}
+                                  >
+                                    <span>✓ Anexo 4</span>
+                                    <span className="text-[9px]">↗</span>
+                                  </a>
+                                ) : (
+                                  <span className="text-emerald-700 font-extrabold text-[10px] bg-emerald-50 px-1 py-0.5 rounded border border-emerald-300" title={l.permisoPadreAnexo4Name || undefined}>
+                                    ✓ Anexo 4
+                                  </span>
+                                )
                               ) : (
                                 <span className="text-red-600 font-extrabold text-[10px] bg-red-50 px-1 py-0.5 rounded border border-red-300">
                                   ⚠️ Sin Anexo 4
@@ -1126,10 +1481,11 @@ export const LobatosRegistrationScreen: React.FC<LobatosRegistrationScreenProps>
               onClick={() => selectedAdulto && onOpenSummary(selectedAdulto, lobatos)}
               className="btn-3d btn-blue py-3 px-6 text-sm sm:text-base flex items-center gap-2"
             >
-              <span>✓ REGISTRAR SEISENA ({lobatos.length} LOBATO{lobatos.length === 1 ? '' : 'S'})</span>
+              <span>✓ REGISTRAR {currentSeisenaLabel.toUpperCase()} ({lobatos.length} LOBATO{lobatos.length === 1 ? '' : 'S'})</span>
             </button>
           </div>
         </div>
+      </div>
       </div>
       ) : (
         <div className="win-3d p-8 text-center bg-white/95 max-w-xl mx-auto space-y-4 shadow-[4px_4px_0_#000]">

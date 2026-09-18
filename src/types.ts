@@ -14,14 +14,21 @@ export interface AdultoVoluntario {
   unidad?: string; // backwards compatibility
   ciudad: string;
   localidad?: string; // backwards compatibility
-  cargo: 'DIRIGENTE A CARGO' | 'STAFF' | 'ORGANIZADORES' | string;
+  cargo: 'DIRIGENTE A CARGO' | 'EQUIPO DE APOYO' | 'STAFF' | string;
+  comisionStaff?: 'PROGRAMAS' | 'SERVICIOS' | 'SEGURIDAD Y SFH' | 'COMUNICACION' | 'ADMINISTRACION Y FINANZAS' | string;
   email?: string;
   celular?: string;
+  dirigenteReferenteId?: string;
+  dirigenteReferenteNombre?: string;
+  dirigenteReferenteAsp?: string;
   archivoAnexo3?: string;
+  archivoAnexo3Name?: string;
   archivoAnexo3Size?: string;
+  archivoAnexo3DocId?: string;
   voucherPago?: string;
   voucherPagoName?: string;
   voucherPagoSize?: string;
+  voucherPagoDocId?: string;
   avatarSeed?: string;
 }
 
@@ -36,7 +43,10 @@ export interface Lobato {
   grupoScout: string;
   ciudad?: string;
   unidad?: string; // backwards compatibility
-  permisoPadreAnexo4?: string; // Nombre del archivo del Anexo 4
+  permisoPadreAnexo4?: string; // URL en GCS o dataUrl del Anexo 4
+  permisoPadreAnexo4Name?: string; // Nombre original del archivo Anexo 4
+  permisoPadreAnexo4Size?: string; // Tamaño formateado
+  permisoPadreAnexo4DocId?: string; // ID en colección documentos_anexos
   adultoId: string;
   adultoNombre: string;
   adultoAsp?: string; // Código ASP del dirigente responsable
@@ -51,16 +61,23 @@ export interface DirigenteRegistro {
   dni: string;
   registroAsp: string;
   grupoScout: string;
-  cargo: 'DIRIGENTE A CARGO' | 'STAFF' | 'ORGANIZADORES' | string;
+  cargo: 'DIRIGENTE A CARGO' | 'EQUIPO DE APOYO' | 'STAFF' | string;
+  comisionStaff?: 'PROGRAMAS' | 'SERVICIOS' | 'SEGURIDAD Y SFH' | 'COMUNICACION' | 'ADMINISTRACION Y FINANZAS' | string;
   ciudad: string;
   email: string;
   celular: string;
   nicknameRoblox: string;
+  dirigenteReferenteId?: string;
+  dirigenteReferenteNombre?: string;
+  dirigenteReferenteAsp?: string;
   archivoAnexo3?: string;
+  archivoAnexo3Name?: string;
   archivoAnexo3Size?: string;
+  archivoAnexo3DocId?: string;
   voucherPago?: string;
   voucherPagoName?: string;
   voucherPagoSize?: string;
+  voucherPagoDocId?: string;
 }
 
 export type ScreenType = 'home' | 'dirigente' | 'lobatos' | 'nicknames';

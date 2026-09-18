@@ -4,6 +4,9 @@ import { Check, X, Trash2, Edit3, Shield, Award, FileText, Upload, FileCheck, Lo
 import { Lobato, AdultoVoluntario, DirigenteRegistro } from '../types';
 import { formatFechaNacimiento, calcularEdad } from '../utils/lobatoUtils';
 import { uploadDocumentoAnexo } from '../lib/databaseService';
+import { REGIONES_LOCALIDADES_SCOUT } from '../data/regionesScout';
+import { ScoutSuggestInput } from './ScoutSuggestInput';
+import { useScoutSuggestions } from '../hooks/useScoutSuggestions';
 
 // --- EDIT LOBATO MODAL ---
 interface EditLobatoModalProps {
@@ -23,6 +26,9 @@ export const EditLobatoModal: React.FC<EditLobatoModalProps> = ({ lobato, onSave
     grupoScout: lobato.grupoScout || lobato.unidad || '',
     ciudad: lobato.ciudad || '',
     permisoPadreAnexo4: lobato.permisoPadreAnexo4 || '',
+    permisoPadreAnexo4Name: lobato.permisoPadreAnexo4Name || '',
+    permisoPadreAnexo4Size: lobato.permisoPadreAnexo4Size || '',
+    permisoPadreAnexo4DocId: lobato.permisoPadreAnexo4DocId || '',
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -33,28 +39,57 @@ export const EditLobatoModal: React.FC<EditLobatoModalProps> = ({ lobato, onSave
     message: string;
   } | null>(null);
 
+  const {
+    gruposScout,
+    regiones,
+    dbGruposSet,
+    dbRegionesSet,
+    addCustomSuggestion,
+  } = useScoutSuggestions();
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      const formattedSize = file.size > 1024 * 1024
+        ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+        : `${(file.size / 1024).toFixed(0)} KB`;
       setIsUploading(true);
       setStorageNotice(null);
       try {
         const uploadRes = await uploadDocumentoAnexo('ANEXO_4_LOBATO', file, lobato.id);
         const url = uploadRes.meta?.downloadUrl || uploadRes.meta?.dataUrl || '';
         if (uploadRes.success && url) {
-          setFormData((prev) => ({ ...prev, permisoPadreAnexo4: url }));
+          setFormData((prev) => ({
+            ...prev,
+            permisoPadreAnexo4: url,
+            permisoPadreAnexo4Name: file.name,
+            permisoPadreAnexo4Size: formattedSize,
+            permisoPadreAnexo4DocId: uploadRes.meta?.id || '',
+          }));
           setStorageNotice({
             type: 'success',
-            message: `✓ Archivo guardado en Google Cloud Storage (${file.name})`,
+            message: `✓ Archivo guardado en Google Cloud Storage (${file.name} • ${formattedSize})`,
           });
         } else if (url) {
-          setFormData((prev) => ({ ...prev, permisoPadreAnexo4: url }));
+          setFormData((prev) => ({
+            ...prev,
+            permisoPadreAnexo4: url,
+            permisoPadreAnexo4Name: file.name,
+            permisoPadreAnexo4Size: formattedSize,
+            permisoPadreAnexo4DocId: uploadRes.meta?.id || '',
+          }));
           setStorageNotice({
             type: 'success',
-            message: `✓ Documento procesado (${file.name})`,
+            message: `✓ Documento procesado (${file.name} • ${formattedSize})`,
           });
         } else {
-          setFormData((prev) => ({ ...prev, permisoPadreAnexo4: file.name }));
+          setFormData((prev) => ({
+            ...prev,
+            permisoPadreAnexo4: file.name,
+            permisoPadreAnexo4Name: file.name,
+            permisoPadreAnexo4Size: formattedSize,
+            permisoPadreAnexo4DocId: '',
+          }));
           setStorageNotice({
             type: 'warning',
             message: `⚠️ Subida a GCS pendiente de permisos/CORS: ${uploadRes.error || 'Revisa consola'}.`,
@@ -79,12 +114,22 @@ export const EditLobatoModal: React.FC<EditLobatoModalProps> = ({ lobato, onSave
     if (!formData.apellidos.trim()) newErrors.apellidos = 'Ingresa los apellidos';
     if (!formData.dni.trim()) newErrors.dni = 'Ingresa el DNI';
     if (!formData.fechaNacimiento.trim()) newErrors.fechaNacimiento = 'Selecciona la fecha de nacimiento';
-    if (!formData.grupoScout.trim()) newErrors.grupoScout = 'Ingresa el grupo scout';
-    if (!formData.ciudad.trim()) newErrors.ciudad = 'Ingresa la ciudad';
+    if (!formData.grupoScout.trim()) newErrors.grupoScout = 'Ingresa el Grupo Scout y numeral (ej. Lima 02)';
+    if (!formData.ciudad.trim()) newErrors.ciudad = 'Ingresa la Región - Localidad (ej. Arequipa Sur XI)';
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       return;
+    }
+
+    const cleanNick = formData.nicknameRoblox.replace(/^@+/, '').trim();
+    const formattedNickname = cleanNick ? (cleanNick.startsWith('@') ? cleanNick : `@${cleanNick}`) : '';
+
+    if (formData.grupoScout.trim()) {
+      addCustomSuggestion('grupoScout', formData.grupoScout.trim());
+    }
+    if (formData.ciudad.trim()) {
+      addCustomSuggestion('region', formData.ciudad.trim());
     }
 
     onSave({
@@ -93,12 +138,15 @@ export const EditLobatoModal: React.FC<EditLobatoModalProps> = ({ lobato, onSave
       apellidos: formData.apellidos.trim(),
       dni: formData.dni.trim(),
       fechaNacimiento: formData.fechaNacimiento.trim(),
-      nicknameRoblox: formData.nicknameRoblox.trim(),
+      nicknameRoblox: formattedNickname,
       seisena: formData.seisena,
       grupoScout: formData.grupoScout.trim(),
       ciudad: formData.ciudad.trim(),
       unidad: formData.grupoScout.trim(),
       permisoPadreAnexo4: formData.permisoPadreAnexo4.trim(),
+      permisoPadreAnexo4Name: formData.permisoPadreAnexo4Name.trim(),
+      permisoPadreAnexo4Size: formData.permisoPadreAnexo4Size.trim(),
+      permisoPadreAnexo4DocId: formData.permisoPadreAnexo4DocId.trim(),
     });
   };
 
@@ -170,15 +218,25 @@ export const EditLobatoModal: React.FC<EditLobatoModalProps> = ({ lobato, onSave
             </div>
 
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-bold uppercase text-black font-game">
-                Nickname Roblox
+              <label className="text-xs font-bold uppercase text-black font-game flex items-center justify-between">
+                <span>Nickname Roblox</span>
+                <span className="text-[10px] text-slate-500 font-semibold normal-case">@usuario</span>
               </label>
-              <input
-                type="text"
-                value={formData.nicknameRoblox}
-                onChange={(e) => setFormData({ ...formData, nicknameRoblox: e.target.value })}
-                className="input-3d"
-              />
+              <div className="relative flex items-center">
+                <span className="absolute left-2.5 text-slate-500 font-black font-mono text-xs select-none pointer-events-none">
+                  @
+                </span>
+                <input
+                  type="text"
+                  value={formData.nicknameRoblox.replace(/^@+/, '')}
+                  onChange={(e) => {
+                    const clean = e.target.value.replace(/^@+/, '');
+                    setFormData({ ...formData, nicknameRoblox: clean ? `@${clean}` : '' });
+                  }}
+                  placeholder="akela_2809"
+                  className="input-3d !pl-7 text-xs"
+                />
+              </div>
             </div>
 
             {/* Fecha de Nacimiento */}
@@ -219,32 +277,42 @@ export const EditLobatoModal: React.FC<EditLobatoModalProps> = ({ lobato, onSave
               </select>
             </div>
 
-            {/* Grupo Scout (Input text) */}
+            {/* Grupo Scout y numeral */}
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-bold uppercase text-black font-game">
-                Grupo Scout <span className="text-red-500">*</span>
+              <label className="text-xs font-bold uppercase text-black font-game flex items-center justify-between">
+                <span>Grupo Scout y numeral <span className="text-red-500">*</span></span>
+                <span className="text-[10px] text-slate-500 font-semibold normal-case">Ej. Lima 02</span>
               </label>
-              <input
-                type="text"
+              <ScoutSuggestInput
+                id="modal-edit-grupo-scout"
                 value={formData.grupoScout}
-                onChange={(e) => setFormData({ ...formData, grupoScout: e.target.value })}
-                placeholder="Ej. Grupo Scout Lima 02"
-                className="input-3d"
+                onChange={(val) => setFormData({ ...formData, grupoScout: val })}
+                placeholder="Ej. Lima 02 (o según su país)"
+                categoryType="grupoScout"
+                suggestions={gruposScout}
+                dbSuggestionsSet={dbGruposSet}
+                onBlurCustom={(val) => addCustomSuggestion('grupoScout', val)}
+                error={errors.grupoScout}
               />
               {errors.grupoScout && <p className="text-xs text-red-600 font-bold font-game">{errors.grupoScout}</p>}
             </div>
 
-            {/* Ciudad */}
+            {/* Región - Localidad */}
             <div className="flex flex-col gap-1 sm:col-span-2">
-              <label className="text-xs font-bold uppercase text-black font-game">
-                Ciudad <span className="text-red-500">*</span>
+              <label className="text-xs font-bold uppercase text-black font-game flex items-center justify-between">
+                <span>Región - Localidad <span className="text-red-500">*</span></span>
+                <span className="text-[10px] text-slate-500 font-semibold normal-case">Ej. Arequipa Sur XI</span>
               </label>
-              <input
-                type="text"
+              <ScoutSuggestInput
+                id="modal-edit-region-ciudad"
                 value={formData.ciudad}
-                onChange={(e) => setFormData({ ...formData, ciudad: e.target.value })}
-                placeholder="Ej. Lima, Arequipa, Cusco..."
-                className="input-3d"
+                onChange={(val) => setFormData({ ...formData, ciudad: val })}
+                placeholder="Ej. Arequipa Sur XI (o según su país)"
+                categoryType="region"
+                suggestions={regiones}
+                dbSuggestionsSet={dbRegionesSet}
+                onBlurCustom={(val) => addCustomSuggestion('region', val)}
+                error={errors.ciudad}
               />
               {errors.ciudad && <p className="text-xs text-red-600 font-bold font-game">{errors.ciudad}</p>}
             </div>
@@ -275,28 +343,57 @@ export const EditLobatoModal: React.FC<EditLobatoModalProps> = ({ lobato, onSave
                 <span className="btn-3d btn-yellow py-0.5 px-2 text-[10px]">Subir</span>
               </div>
             ) : (
-              <div className="bg-emerald-50 border-2 border-black rounded-xl p-2 flex items-center justify-between gap-2">
+              <div className="bg-emerald-50 border-2 border-black rounded-xl p-2.5 flex items-center justify-between gap-2 shadow-[1px_1px_0_#000]">
                 <div className="flex items-center gap-2 min-w-0">
                   <FileCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span className="font-game font-bold text-xs text-black truncate">
-                    {formData.permisoPadreAnexo4}
-                  </span>
+                  <div className="min-w-0">
+                    <span className="font-game font-bold text-xs text-black truncate block" title={formData.permisoPadreAnexo4Name || formData.permisoPadreAnexo4}>
+                      {formData.permisoPadreAnexo4Name || (formData.permisoPadreAnexo4.startsWith('http') ? 'Documento Anexo 4' : formData.permisoPadreAnexo4)}
+                    </span>
+                    <div className="flex items-center gap-1.5 text-[10px] text-emerald-800 font-bold">
+                      <span>✓ Documento listo</span>
+                      {formData.permisoPadreAnexo4Size && (
+                        <span>• {formData.permisoPadreAnexo4Size}</span>
+                      )}
+                    </div>
+                  </div>
                   {isUploading && (
-                    <span className="flex items-center gap-1 text-[10px] text-blue-700 font-bold">
+                    <span className="flex items-center gap-1 text-[10px] text-blue-700 font-bold ml-1 shrink-0">
                       <Loader2 className="w-3 h-3 animate-spin" /> Subiendo...
                     </span>
                   )}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFormData({ ...formData, permisoPadreAnexo4: '' });
-                    setStorageNotice(null);
-                  }}
-                  className="text-red-600 font-bold text-xs"
-                >
-                  ✕
-                </button>
+                <div className="flex items-center gap-1 shrink-0">
+                  {formData.permisoPadreAnexo4.startsWith('http') && (
+                    <a
+                      href={formData.permisoPadreAnexo4}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn-3d btn-yellow py-0.5 px-2 text-[10px] flex items-center gap-0.5 shadow-[0_1px_0_#000]"
+                      title="Ver documento en pestaña nueva"
+                    >
+                      <span>Ver</span>
+                      <span className="text-[9px]">↗</span>
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormData({
+                        ...formData,
+                        permisoPadreAnexo4: '',
+                        permisoPadreAnexo4Name: '',
+                        permisoPadreAnexo4Size: '',
+                        permisoPadreAnexo4DocId: '',
+                      });
+                      setStorageNotice(null);
+                    }}
+                    className="text-red-600 hover:text-red-800 font-bold text-xs p-1"
+                    title="Quitar documento"
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
             )}
 
@@ -403,6 +500,8 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
   onConfirm,
   onCancel,
 }) => {
+  const adultoFullName = adulto.nombre?.trim() || `${(adulto as any).nombres || ''} ${(adulto as any).apellidos || ''}`.trim() || 'Dirigente Scout';
+
   return (
     <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
       <motion.div
@@ -439,14 +538,24 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
                   alt="World Scout Emblem"
                   className="w-5 h-5 object-contain"
                 />
-                <span>{adulto.nombre}</span>
+                <span>{adultoFullName}</span>
               </h4>
               <p className="text-xs text-slate-600 font-semibold flex items-center gap-2 flex-wrap mt-0.5">
-                <span>ASP: <strong>{adulto.registroAsp}</strong></span>
+                <span>Código: <strong>{adulto.registroAsp}</strong></span>
                 <span>•</span>
-                <span>Grupo Scout: <strong>{adulto.grupoScout || adulto.unidad}</strong></span>
-                <span>•</span>
-                <span>Ciudad: <strong>{adulto.ciudad || adulto.localidad}</strong></span>
+                <span>GS: <strong>{adulto.grupoScout || adulto.unidad}</strong></span>
+                {(adulto.ciudad || adulto.localidad) && (
+                  <>
+                    <span>•</span>
+                    <span><strong>{adulto.ciudad || adulto.localidad}</strong></span>
+                  </>
+                )}
+                {adulto.cargo === 'STAFF' && (adulto as any).comisionStaff && (
+                  <>
+                    <span>•</span>
+                    <span className="text-purple-700 font-bold">🎖️ {(adulto as any).comisionStaff}</span>
+                  </>
+                )}
                 {adulto.archivoAnexo3 && (
                   <span>• <span className="text-blue-800 font-bold">📄 {adulto.archivoAnexo3Name || (adulto.archivoAnexo3.startsWith('http') ? 'Anexo 3' : adulto.archivoAnexo3)}</span></span>
                 )}
@@ -455,9 +564,16 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
                 )}
               </p>
             </div>
-            <span className="px-2.5 py-1 rounded-lg bg-blue-500 text-white border border-black text-xs font-bold font-game">
-              {adulto.cargo || 'DIRIGENTE A CARGO'}
-            </span>
+            <div className="flex flex-col items-end gap-1">
+              <span className="px-2.5 py-1 rounded-lg bg-blue-500 text-white border border-black text-xs font-bold font-game">
+                {adulto.cargo || 'DIRIGENTE A CARGO'}
+              </span>
+              {adulto.cargo === 'STAFF' && (adulto as any).comisionStaff && (
+                <span className="text-[10px] font-bold text-purple-800 bg-purple-100 px-2 py-0.5 rounded border border-purple-300">
+                  {(adulto as any).comisionStaff}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -493,7 +609,7 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
                       <span>•</span>
                       <span>F. Nac: {formatFechaNacimiento(lob.fechaNacimiento)} {edadCalc ? `(${edadCalc}a)` : ''}</span>
                       <span>•</span>
-                      <span>Roblox: <strong className="text-blue-600">{lob.nicknameRoblox || 'N/A'}</strong></span>
+                      <span>Roblox: <strong className="text-blue-600 font-mono">{lob.nicknameRoblox ? (lob.nicknameRoblox.startsWith('@') ? lob.nicknameRoblox : `@${lob.nicknameRoblox}`) : 'N/A'}</strong></span>
                       {lob.permisoPadreAnexo4 && (
                         <span className="text-emerald-700 font-bold text-[10px] bg-emerald-50 px-1 rounded border border-emerald-200">
                           ✓ Anexo 4
@@ -542,6 +658,8 @@ export const SuccessVictoryModal: React.FC<SuccessVictoryModalProps> = ({
   onReset,
   onGoHome,
 }) => {
+  const adultoFullName = adulto.nombre?.trim() || `${(adulto as any).nombres || ''} ${(adulto as any).apellidos || ''}`.trim() || 'Dirigente';
+
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
       <motion.div
@@ -566,7 +684,7 @@ export const SuccessVictoryModal: React.FC<SuccessVictoryModalProps> = ({
         </h2>
 
         <p className="text-sm text-slate-700 font-semibold leading-relaxed max-w-md mx-auto mb-6">
-          Se han procesado correctamente <strong className="text-blue-700 font-bold">{count} lobato(s)</strong> bajo la responsabilidad de <strong className="text-black font-bold">{adulto.nombre}</strong>.
+          Se han procesado correctamente <strong className="text-blue-700 font-bold">{count} lobato(s)</strong> bajo la responsabilidad de <strong className="text-black font-bold">{adultoFullName}</strong>.
         </p>
 
         {/* Ticket / Confirmation Code Badge */}
@@ -577,7 +695,7 @@ export const SuccessVictoryModal: React.FC<SuccessVictoryModalProps> = ({
           </div>
           <div className="grid grid-cols-2 gap-2 text-xs">
             <div>
-              <span className="text-slate-500 block text-[10px] font-bold">Grupo Scout</span>
+              <span className="text-slate-500 block text-[10px] font-bold">GS</span>
               <span className="text-black font-bold">{adulto.grupoScout || adulto.unidad}</span>
             </div>
             <div>
@@ -599,7 +717,7 @@ export const SuccessVictoryModal: React.FC<SuccessVictoryModalProps> = ({
             onClick={onReset}
             className="btn-3d btn-yellow py-3 px-6 w-full text-sm font-bold"
           >
-            + Registrar Otra Manada
+            + Registrar Otra Seisena
           </button>
         </div>
       </motion.div>
@@ -657,6 +775,12 @@ export const DirigenteSuccessModal: React.FC<DirigenteSuccessModalProps> = ({
             <span className="text-slate-500 font-bold">Cargo:</span>
             <span className="text-emerald-700 font-extrabold">{dirigente.cargo}</span>
           </div>
+          {dirigente.cargo === 'STAFF' && dirigente.comisionStaff && (
+            <div className="flex justify-between pt-1 border-t border-slate-200">
+              <span className="text-slate-500 font-bold">Comisión / Unidad:</span>
+              <span className="text-purple-700 font-extrabold">🎖️ {dirigente.comisionStaff}</span>
+            </div>
+          )}
           <div className="flex justify-between">
             <span className="text-slate-500 font-bold">ASP:</span>
             <span className="text-black font-extrabold">{dirigente.registroAsp}</span>
@@ -666,13 +790,27 @@ export const DirigenteSuccessModal: React.FC<DirigenteSuccessModalProps> = ({
             <span className="text-black font-bold">{dirigente.dni}</span>
           </div>
           <div className="flex justify-between">
+            <span className="text-slate-500 font-bold">Nickname Roblox:</span>
+            <span className="text-blue-700 font-extrabold font-mono">
+              {dirigente.nicknameRoblox ? (dirigente.nicknameRoblox.startsWith('@') ? dirigente.nicknameRoblox : `@${dirigente.nicknameRoblox}`) : '—'}
+            </span>
+          </div>
+          <div className="flex justify-between">
             <span className="text-slate-500 font-bold">Grupo Scout:</span>
             <span className="text-black font-bold">{dirigente.grupoScout || dirigente.unidad}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-slate-500 font-bold">Ciudad:</span>
+            <span className="text-slate-500 font-bold">Región - Localidad:</span>
             <span className="text-black font-bold">{dirigente.ciudad || dirigente.localidad}</span>
           </div>
+          {dirigente.cargo === 'EQUIPO DE APOYO' && dirigente.dirigenteReferenteNombre && (
+            <div className="flex justify-between pt-1 border-t border-slate-200">
+              <span className="text-slate-500 font-bold">Dirigente Referente:</span>
+              <span className="text-amber-900 font-extrabold truncate max-w-[180px]">
+                🤝 {dirigente.dirigenteReferenteNombre} {dirigente.dirigenteReferenteAsp ? `(ASP- ..${dirigente.dirigenteReferenteAsp.replace(/[^0-9]/g, '').slice(-2)})` : ''}
+              </span>
+            </div>
+          )}
           {dirigente.archivoAnexo3 && (
             <div className="flex justify-between pt-1 border-t border-slate-200">
               <span className="text-slate-500 font-bold">Anexo 3 / Lista:</span>
